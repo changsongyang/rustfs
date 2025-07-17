@@ -241,7 +241,73 @@ let value: f64 = "3.14".parse().unwrap();
 let cache: HashMap<String, Arc<Mutex<CacheEntry>>> = HashMap::new();
 ```
 
-### 5. Documentation Comments
+### 5. **🌍 MANDATORY Comment Language Requirements**
+
+**CRITICAL**: All code comments and documentation must be written in English.
+
+#### Language Requirements (MANDATORY)
+
+- **ALL code comments must be written in English** - NO exceptions
+- **ALL documentation comments must be written in English** - NO exceptions
+- **ALL inline comments must be written in English** - NO exceptions
+- **ALL TODO comments must be written in English** - NO exceptions
+- **ALL debug comments must be written in English** - NO exceptions
+- **Avoid any non-English text in code comments**
+- **Use clear, professional English in all comments**
+
+#### Examples of Proper English Comments
+
+```rust
+// Calculate the total storage size across all disks
+let total_size = calculate_total_storage();
+
+/// Processes user authentication request
+/// 
+/// # Arguments
+/// * `username` - The username to authenticate
+/// * `password` - The password to verify
+/// 
+/// # Returns
+/// Returns `Ok(User)` if authentication succeeds, `Err(AuthError)` otherwise
+/// 
+/// # Errors
+/// Returns `AuthError::InvalidCredentials` if username or password is incorrect
+pub fn authenticate_user(username: &str, password: &str) -> Result<User, AuthError> {
+    // Validate input parameters
+    if username.is_empty() || password.is_empty() {
+        return Err(AuthError::InvalidCredentials);
+    }
+    
+    // TODO: Implement rate limiting for authentication attempts
+    // Hash the password for comparison
+    let hashed_password = hash_password(password);
+    
+    // ... rest of implementation
+}
+```
+
+#### Forbidden Comment Patterns
+
+```rust
+// ❌ WRONG - Chinese comments
+// 计算存储大小
+// 验证用户密码
+
+// ❌ WRONG - Mixed languages
+// Calculate size 计算大小
+
+// ❌ WRONG - Non-descriptive comments
+// debug 111
+// test test
+// foo bar
+
+// ✅ CORRECT - English comments
+// Calculate total storage size across all available disks
+// Validate user password against stored hash
+// Process authentication request and return user session
+```
+
+### 6. Documentation Comments
 
 - Public APIs must have documentation comments
 - Use `///` for documentation comments
@@ -250,7 +316,7 @@ let cache: HashMap<String, Arc<Mutex<CacheEntry>>> = HashMap::new();
 - Always use English for all comments and documentation
 - Avoid meaningless comments like "debug 111" or placeholder text
 
-### 6. Import Guidelines
+### 7. Import Guidelines
 
 - Standard library imports first
 - Third-party crate imports in the middle
