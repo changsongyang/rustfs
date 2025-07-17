@@ -40,6 +40,9 @@ byteorder = { workspace = true }
 tracing.workspace = true
 thiserror.workspace = true
 s3s.workspace = true
+paste.workspace = true
+async-trait.workspace = true
+num-traits = "0.2.19"
 
 [dev-dependencies]
 criterion = { workspace = true }

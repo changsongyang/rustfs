@@ -19,6 +19,8 @@ mod filemeta_inline;
 pub mod headers;
 mod metacache;
 
+pub mod rmp;
+
 pub mod test_data;
 
 pub use error::*;

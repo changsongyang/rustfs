@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use crate::error::{Error, Result};
+use crate::rmp::RmpReader;
 use crate::{FileInfo, FileInfoVersions, FileMeta, FileMetaShallowVersion, VersionType, merge_file_meta_versions};
-use rmp::Marker;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::str::from_utf8;
@@ -47,31 +47,64 @@ pub struct MetadataResolutionParams {
     pub candidates: Vec<Vec<FileMetaShallowVersion>>,
 }
 
+/// MetaCacheEntryType is the type of the entry.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub enum MetaCacheEntryType {
+    /// Object is a valid object.
+    Object,
+    /// Error is an error.
+    Error,
+    /// Close is a close message.
+    #[default]
+    Close,
+}
+
+impl MetaCacheEntryType {
+    pub fn to_u8(&self) -> u8 {
+        match self {
+            MetaCacheEntryType::Object => 1,
+            MetaCacheEntryType::Error => 2,
+            MetaCacheEntryType::Close => 0,
+        }
+    }
+
+    pub fn from_u8(val: u8) -> Self {
+        match val {
+            1 => MetaCacheEntryType::Object,
+            2 => MetaCacheEntryType::Error,
+            0 => MetaCacheEntryType::Close,
+            _ => MetaCacheEntryType::Close, // default to close
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct MetaCacheEntry {
+    /// msg_type is the type of the entry.
+    pub msg_type: MetaCacheEntryType,
+
     /// name is the full name of the object including prefixes
     pub name: String,
     /// Metadata. If none is present it is not an object but only a prefix.
     /// Entries without metadata will only be present in non-recursive scans.
     pub metadata: Vec<u8>,
 
+    /// err_no is the error number if the entry is not valid.
+    pub err_no: u32,
+
+    /// err_msg is the error message if the entry is not valid.
+    pub err_msg: String,
+
     /// cached contains the metadata if decoded.
     #[serde(skip)]
     pub cached: Option<FileMeta>,
 
     /// Indicates the entry can be reused and only one reference to metadata is expected.
+    #[serde(skip)]
     pub reusable: bool,
 }
 
 impl MetaCacheEntry {
-    pub fn marshal_msg(&self) -> Result<Vec<u8>> {
-        let mut wr = Vec::new();
-        rmp::encode::write_bool(&mut wr, true)?;
-        rmp::encode::write_str(&mut wr, &self.name)?;
-        rmp::encode::write_bin(&mut wr, &self.metadata)?;
-        Ok(wr)
-    }
-
     pub fn is_dir(&self) -> bool {
         self.metadata.is_empty() && self.name.ends_with('/')
     }
@@ -411,6 +444,8 @@ impl MetaCacheEntries {
             }),
             reusable: true,
             metadata,
+            msg_type: MetaCacheEntryType::Object,
+            ..Default::default()
         };
 
         warn!("decommission_pool: entries resolve entry selected {:?}", new_selected.name);
@@ -451,7 +486,7 @@ impl MetaCacheEntriesSorted {
     }
 }
 
-const METACACHE_STREAM_VERSION: u8 = 2;
+const METACACHE_STREAM_VERSION_V1: u8 = 1;
 
 #[derive(Debug)]
 pub struct MetacacheWriter<W> {
@@ -477,8 +512,7 @@ impl<W: AsyncWrite + Unpin> MetacacheWriter<W> {
 
     pub async fn init(&mut self) -> Result<()> {
         if !self.created {
-            rmp::encode::write_u8(&mut self.buf, METACACHE_STREAM_VERSION).map_err(|e| Error::other(format!("{e:?}")))?;
-            self.flush().await?;
+            self.write_version(METACACHE_STREAM_VERSION_V1).await?;
             self.created = true;
         }
         Ok(())
@@ -502,20 +536,34 @@ impl<W: AsyncWrite + Unpin> MetacacheWriter<W> {
         Ok(())
     }
 
+    async fn write_version(&mut self, version: u8) -> Result<()> {
+        rmp::encode::write_pfix(&mut self.buf, version)?;
+        self.flush().await?;
+        Ok(())
+    }
+
+    /// Write a single object to the buffer.
     pub async fn write_obj(&mut self, obj: &MetaCacheEntry) -> Result<()> {
         self.init().await?;
 
-        rmp::encode::write_bool(&mut self.buf, true).map_err(|e| Error::other(format!("{e:?}")))?;
-        rmp::encode::write_str(&mut self.buf, &obj.name).map_err(|e| Error::other(format!("{e:?}")))?;
-        rmp::encode::write_bin(&mut self.buf, &obj.metadata).map_err(|e| Error::other(format!("{e:?}")))?;
+        rmp::encode::write_pfix(&mut self.buf, obj.msg_type.to_u8())?;
+        rmp::encode::write_str(&mut self.buf, &obj.name)?;
+        rmp::encode::write_bin(&mut self.buf, &obj.metadata)?;
+        rmp::encode::write_u32(&mut self.buf, obj.err_no)?;
+        rmp::encode::write_str(&mut self.buf, &obj.err_msg)?;
+
         self.flush().await?;
 
         Ok(())
     }
 
     pub async fn close(&mut self) -> Result<()> {
-        rmp::encode::write_bool(&mut self.buf, false).map_err(|e| Error::other(format!("{e:?}")))?;
-        self.flush().await?;
+        let obj = MetaCacheEntry {
+            msg_type: MetaCacheEntryType::Close,
+            ..Default::default()
+        };
+
+        self.write_obj(&obj).await?;
         Ok(())
     }
 }
@@ -529,7 +577,7 @@ pub struct MetacacheReader<R> {
     current: Option<MetaCacheEntry>,
 }
 
-impl<R: AsyncRead + Unpin> MetacacheReader<R> {
+impl<R: AsyncRead + Unpin + Send + Sync> MetacacheReader<R> {
     pub fn new(rd: R) -> Self {
         Self {
             rd,
@@ -541,44 +589,42 @@ impl<R: AsyncRead + Unpin> MetacacheReader<R> {
         }
     }
 
-    pub async fn read_more(&mut self, read_size: usize) -> Result<&[u8]> {
-        let ext_size = read_size + self.offset;
+    // pub async fn read_more(&mut self, read_size: usize) -> Result<&[u8]> {
+    //     let ext_size = read_size + self.offset;
 
-        let extra = ext_size - self.offset;
-        if self.buf.capacity() >= ext_size {
-            // Extend the buffer if we have enough space.
-            self.buf.resize(ext_size, 0);
-        } else {
-            self.buf.extend(vec![0u8; extra]);
-        }
+    //     let extra = ext_size - self.offset;
+    //     if self.buf.capacity() >= ext_size {
+    //         // Extend the buffer if we have enough space.
+    //         self.buf.resize(ext_size, 0);
+    //     } else {
+    //         self.buf.extend(vec![0u8; extra]);
+    //     }
 
-        let pref = self.offset;
+    //     let pref = self.offset;
 
-        self.rd.read_exact(&mut self.buf[pref..ext_size]).await?;
+    //     self.rd.read_exact(&mut self.buf[pref..ext_size]).await?;
 
-        self.offset += read_size;
+    //     self.offset += read_size;
 
-        let data = &self.buf[pref..ext_size];
+    //     let data = &self.buf[pref..ext_size];
 
-        Ok(data)
-    }
+    //     Ok(data)
+    // }
 
     fn reset(&mut self) {
         self.buf.clear();
         self.offset = 0;
     }
 
+    async fn read_version(&mut self) -> Result<u8> {
+        super::rmp::decode::read_u8(&mut self.rd).await.map_err(|e| e.into())
+    }
+
     async fn check_init(&mut self) -> Result<()> {
         if !self.init {
-            let ver = match rmp::decode::read_u8(&mut self.read_more(2).await?) {
-                Ok(res) => res,
-                Err(err) => {
-                    self.err = Some(Error::other(format!("{err:?}")));
-                    0
-                }
-            };
+            let ver = self.read_version().await?;
             match ver {
-                1 | 2 => (),
+                METACACHE_STREAM_VERSION_V1 => (),
                 _ => {
                     self.err = Some(Error::other("invalid version"));
                 }
@@ -589,57 +635,75 @@ impl<R: AsyncRead + Unpin> MetacacheReader<R> {
         Ok(())
     }
 
-    async fn read_str_len(&mut self) -> Result<u32> {
-        let mark = match rmp::decode::read_marker(&mut self.read_more(1).await?) {
-            Ok(res) => res,
-            Err(err) => {
-                let err: Error = err.into();
-                self.err = Some(err.clone());
-                return Err(err);
-            }
-        };
+    // async fn read_str_len(&mut self) -> Result<u32> {
+    //     let mark = match rmp::decode::read_marker(&mut self.read_more(1).await?) {
+    //         Ok(res) => res,
+    //         Err(err) => {
+    //             let err: Error = err.into();
+    //             self.err = Some(err.clone());
+    //             return Err(err);
+    //         }
+    //     };
 
-        match mark {
-            Marker::FixStr(size) => Ok(u32::from(size)),
-            Marker::Str8 => Ok(u32::from(self.read_u8().await?)),
-            Marker::Str16 => Ok(u32::from(self.read_u16().await?)),
-            Marker::Str32 => Ok(self.read_u32().await?),
-            _marker => Err(Error::other("str marker err")),
-        }
-    }
+    //     match mark {
+    //         Marker::FixStr(size) => Ok(u32::from(size)),
+    //         Marker::Str8 => Ok(u32::from(self.read_u8().await?)),
+    //         Marker::Str16 => Ok(u32::from(self.read_u16().await?)),
+    //         Marker::Str32 => Ok(self.read_u32().await?),
+    //         _marker => Err(Error::other("str marker err")),
+    //     }
+    // }
 
-    async fn read_bin_len(&mut self) -> Result<u32> {
-        let mark = match rmp::decode::read_marker(&mut self.read_more(1).await?) {
-            Ok(res) => res,
-            Err(err) => {
-                let err: Error = err.into();
-                self.err = Some(err.clone());
-                return Err(err);
-            }
-        };
+    // async fn read_str_data(&mut self, len: u32) -> Result<String> {
+    //     let buf = self.read_more(len as usize).await?;
+    //     let name_buf = buf.to_vec();
+    //     let name = match from_utf8(&name_buf) {
+    //         Ok(decoded) => decoded.to_owned(),
+    //         Err(err) => {
+    //             return Err(Error::other(err.to_string()));
+    //         }
+    //     };
 
-        match mark {
-            Marker::Bin8 => Ok(u32::from(self.read_u8().await?)),
-            Marker::Bin16 => Ok(u32::from(self.read_u16().await?)),
-            Marker::Bin32 => Ok(self.read_u32().await?),
-            _ => Err(Error::other("bin marker err")),
-        }
-    }
+    //     Ok(name)
+    // }
 
-    async fn read_u8(&mut self) -> Result<u8> {
-        let buf = self.read_more(1).await?;
-        Ok(u8::from_be_bytes(buf.try_into().expect("Slice with incorrect length")))
-    }
+    // async fn read_bin_len(&mut self) -> Result<u32> {
+    //     let mark = match rmp::decode::read_marker(&mut self.read_more(1).await?) {
+    //         Ok(res) => res,
+    //         Err(err) => {
+    //             let err: Error = err.into();
+    //             self.err = Some(err.clone());
+    //             return Err(err);
+    //         }
+    //     };
 
-    async fn read_u16(&mut self) -> Result<u16> {
-        let buf = self.read_more(2).await?;
-        Ok(u16::from_be_bytes(buf.try_into().expect("Slice with incorrect length")))
-    }
+    //     match mark {
+    //         Marker::Bin8 => Ok(u32::from(self.read_u8().await?)),
+    //         Marker::Bin16 => Ok(u32::from(self.read_u16().await?)),
+    //         Marker::Bin32 => Ok(self.read_u32().await?),
+    //         _ => Err(Error::other("bin marker err")),
+    //     }
+    // }
 
-    async fn read_u32(&mut self) -> Result<u32> {
-        let buf = self.read_more(4).await?;
-        Ok(u32::from_be_bytes(buf.try_into().expect("Slice with incorrect length")))
-    }
+    // async fn read_bin_data(&mut self, len: u32) -> Result<Vec<u8>> {
+    //     let buf = self.read_more(len as usize).await?;
+    //     Ok(buf.to_vec())
+    // }
+
+    // async fn read_u8(&mut self) -> Result<u8> {
+    //     let buf = self.read_more(1).await?;
+    //     Ok(u8::from_be_bytes(buf.try_into().expect("Slice with incorrect length")))
+    // }
+
+    // async fn read_u16(&mut self) -> Result<u16> {
+    //     let buf = self.read_more(2).await?;
+    //     Ok(u16::from_be_bytes(buf.try_into().expect("Slice with incorrect length")))
+    // }
+
+    // async fn read_u32(&mut self) -> Result<u32> {
+    //     let buf = self.read_more(4).await?;
+    //     Ok(u32::from_be_bytes(buf.try_into().expect("Slice with incorrect length")))
+    // }
 
     pub async fn skip(&mut self, size: usize) -> Result<()> {
         self.check_init().await?;
@@ -725,6 +789,9 @@ impl<R: AsyncRead + Unpin> MetacacheReader<R> {
             metadata,
             cached: None,
             reusable: false,
+            msg_type: MetaCacheEntryType::Object,
+            err_no: 0,
+            err_msg: String::new(),
         });
         self.current = entry.clone();
 
@@ -743,6 +810,16 @@ impl<R: AsyncRead + Unpin> MetacacheReader<R> {
         }
 
         Ok(ret)
+    }
+}
+
+#[async_trait::async_trait]
+impl<R: AsyncRead + Unpin + Send + Sync> RmpReader for MetacacheReader<R> {
+    type Error = std::io::Error;
+
+    async fn read_exact_buf(&mut self, buf: &mut [u8]) -> std::result::Result<(), Self::Error> {
+        self.rd.read_exact(buf).await?;
+        Ok(())
     }
 }
 
@@ -870,6 +947,9 @@ mod tests {
                 metadata: vec![0u8, 10],
                 cached: None,
                 reusable: false,
+                msg_type: MetaCacheEntryType::Object,
+                err_no: 0,
+                err_msg: String::new(),
             };
             objs.push(info);
         }
