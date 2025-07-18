@@ -18,17 +18,26 @@
 //! ```rust
 //! use rustfs_utils::error_codes::{AutoErrorCode, ErrorCode, ToErrorCode, FromErrorCode, error_types};
 //!
-//! #[derive(thiserror::Error, Debug, PartialEq)]
+//! #[derive(Debug, PartialEq)]
 //! pub enum StorageError {
-//!     #[error("Bucket not found: {0}")]
 //!     BucketNotFound(String),
-//!     #[error("Object not found: {bucket}/{key}")]
 //!     ObjectNotFound { bucket: String, key: String },
-//!     #[error("Storage full")]
 //!     StorageFull,
-//!     #[error("Invalid request")]
 //!     InvalidRequest,
 //! }
+//!
+//! impl std::fmt::Display for StorageError {
+//!     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//!         match self {
+//!             StorageError::BucketNotFound(bucket) => write!(f, "Bucket not found: {}", bucket),
+//!             StorageError::ObjectNotFound { bucket, key } => write!(f, "Object not found: {}/{}", bucket, key),
+//!             StorageError::StorageFull => write!(f, "Storage full"),
+//!             StorageError::InvalidRequest => write!(f, "Invalid request"),
+//!         }
+//!     }
+//! }
+//!
+//! impl std::error::Error for StorageError {}
 //!
 //! impl AutoErrorCode for StorageError {
 //!     fn error_type() -> u16 {
@@ -232,20 +241,6 @@ pub trait FromErrorCode<T> {
     }
 }
 
-/// Trait for defining error code mappings
-///
-/// Each module should implement this trait to define their specific error codes
-pub trait ErrorCodeMapping {
-    /// Get the error type for this module
-    fn error_type() -> u16;
-
-    /// Get all error codes defined by this module
-    fn error_codes() -> Vec<(u16, &'static str)>;
-
-    /// Get the description for a specific error code
-    fn error_description(code: u16) -> Option<&'static str>;
-}
-
 /// Trait for automatic error code generation based on enum variant order
 ///
 /// This trait provides automatic error code generation and parsing for enums,
@@ -277,260 +272,6 @@ impl<T: AutoErrorCode> FromErrorCode<T> for T {
         }
         T::from_variant_index(code.specific_code())
     }
-}
-
-/// Helper macro to implement AutoErrorCode for an enum
-///
-/// This macro generates the required methods for automatic error code handling.
-/// It supports both simple variants and variants with data.
-///
-/// # Example
-///
-/// ```rust
-/// use rustfs_utils::error_codes::{impl_auto_error_code, error_types};
-///
-/// #[derive(Debug)]
-/// enum MyError {
-///     NotFound,
-///     InvalidInput,
-///     Timeout,
-///     Io(std::io::Error),
-/// }
-///
-/// impl_auto_error_code! {
-///     error_type: error_types::SYSTEM,
-///     enum_name: MyError,
-///     variants: {
-///         NotFound => 1,
-///         InvalidInput => 2,
-///         Timeout => 3,
-///         Io => 4,
-///     },
-///     variant_constructors: {
-///         Io => MyError::Io(std::io::Error::other("I/O error")),
-///     }
-/// }
-/// ```
-#[macro_export]
-macro_rules! impl_auto_error_code {
-    (
-        error_type: $error_type:expr,
-        enum_name: $enum_name:ident,
-        variants: {
-            $($variant:ident => $index:expr),* $(,)?
-        }
-    ) => {
-        $crate::impl_auto_error_code! {
-            error_type: $error_type,
-            enum_name: $enum_name,
-            variants: {
-                $($variant => $index),*
-            },
-            variant_constructors: {}
-        }
-    };
-
-    (
-        error_type: $error_type:expr,
-        enum_name: $enum_name:ident,
-        variants: {
-            $($variant:ident => $index:expr),* $(,)?
-        },
-        variant_constructors: {
-            $($constructor_variant:ident => $constructor_expr:expr),* $(,)?
-        }
-    ) => {
-        impl $crate::error_codes::AutoErrorCode for $enum_name {
-            fn error_type() -> u16 {
-                $error_type
-            }
-
-            fn variant_index(&self) -> u16 {
-                match self {
-                    $(
-                        $enum_name::$variant $(..)? => $index,
-                    )*
-                }
-            }
-
-            fn from_variant_index(index: u16) -> Option<Self> {
-                match index {
-                    $(
-                        $index => {
-                            $crate::impl_auto_error_code!(@create_variant $enum_name::$variant, $variant; $($constructor_variant => $constructor_expr),*)
-                        }
-                    )*
-                    _ => None,
-                }
-            }
-        }
-    };
-
-    // Helper to create variant instances
-    (@create_variant $full_variant:path, $variant:ident; $($constructor_variant:ident => $constructor_expr:expr),*) => {
-        $crate::impl_auto_error_code!(@find_constructor $full_variant, $variant; $($constructor_variant => $constructor_expr),*)
-    };
-
-    (@find_constructor $full_variant:path, $variant:ident; $first_constructor:ident => $first_expr:expr $(, $rest_constructor:ident => $rest_expr:expr)*) => {
-        if stringify!($variant) == stringify!($first_constructor) {
-            Some($first_expr)
-        } else {
-            $crate::impl_auto_error_code!(@find_constructor $full_variant, $variant; $($rest_constructor => $rest_expr),*)
-        }
-    };
-
-    (@find_constructor $full_variant:path, $variant:ident;) => {
-        Some($full_variant)
-    };
-}
-
-/// Helper macro to define error codes for a module
-///
-/// # Example
-///
-/// ```rust
-/// use rustfs_utils::error_codes::{define_error_codes, error_types};
-///
-/// define_error_codes! {
-///     error_type: error_types::FILEMETA,
-///     codes: {
-///         FILE_NOT_FOUND = 0x0001,
-///         FILE_VERSION_NOT_FOUND = 0x0002,
-///         VOLUME_NOT_FOUND = 0x0003,
-///         FILE_CORRUPT = 0x0004,
-///     }
-/// }
-/// ```
-#[macro_export]
-macro_rules! define_error_codes {
-    (
-        error_type: $error_type:expr,
-        codes: {
-            $(
-                $name:ident = $code:expr
-            ),* $(,)?
-        }
-    ) => {
-        pub mod error_codes {
-            $(
-                pub const $name: u16 = $code;
-            )*
-        }
-
-        impl $crate::error_codes::ErrorCodeMapping for super::Error {
-            fn error_type() -> u16 {
-                $error_type
-            }
-
-            fn error_codes() -> Vec<(u16, &'static str)> {
-                vec![
-                    $(
-                        ($code, stringify!($name)),
-                    )*
-                ]
-            }
-
-            fn error_description(code: u16) -> Option<&'static str> {
-                match code {
-                    $(
-                        $code => Some(stringify!($name)),
-                    )*
-                    _ => None,
-                }
-            }
-        }
-    };
-}
-
-/// Helper macro to automatically generate error codes based on enum variant order
-///
-/// This macro eliminates the need to manually define error codes by automatically
-/// assigning sequential codes starting from 0x0001 based on the enum definition order.
-///
-/// # Example
-///
-/// ```rust
-/// use rustfs_utils::error_codes::{auto_error_codes, error_types};
-///
-/// #[derive(Debug)]
-/// enum MyError {
-///     NotFound,
-///     InvalidInput,
-///     Timeout,
-/// }
-///
-/// auto_error_codes! {
-///     error_type: error_types::SYSTEM,
-///     enum_name: MyError,
-///     variants: [
-///         NotFound,
-///         InvalidInput,
-///         Timeout,
-///     ]
-/// }
-/// ```
-#[macro_export]
-macro_rules! auto_error_codes {
-    (
-        error_type: $error_type:expr,
-        enum_name: $enum_name:ident,
-        variants: [
-            $($variant:ident),* $(,)?
-        ]
-    ) => {
-        impl $crate::error_codes::ToErrorCode for $enum_name {
-            fn to_error_code(&self) -> $crate::error_codes::ErrorCode {
-                let specific_code = match self {
-                    $(
-                        $enum_name::$variant $(..)? => {
-                            $crate::auto_error_codes!(@count_position $variant; $($variant),*)
-                        }
-                    )*
-                };
-
-                $crate::error_codes::ErrorCode::new($error_type, specific_code)
-            }
-        }
-
-        impl $crate::error_codes::FromErrorCode<$enum_name> for $enum_name {
-            fn from_error_code(code: $crate::error_codes::ErrorCode) -> Option<$enum_name> {
-                if code.error_type() != $error_type {
-                    return None;
-                }
-
-                match code.specific_code() {
-                    $(
-                        $crate::auto_error_codes!(@count_position $variant; $($variant),*) => {
-                            $crate::auto_error_codes!(@create_simple_variant $enum_name::$variant)
-                        }
-                    )*
-                    _ => None,
-                }
-            }
-        }
-    };
-
-    // Count the position of a variant in the list (1-based)
-    (@count_position $target:ident; $($variant:ident),*) => {
-        $crate::auto_error_codes!(@count_position_impl $target, 1; $($variant),*)
-    };
-
-    (@count_position_impl $target:ident, $count:expr; $first:ident $(, $rest:ident)*) => {
-        if stringify!($target) == stringify!($first) {
-            $count
-        } else {
-            $crate::auto_error_codes!(@count_position_impl $target, $count + 1; $($rest),*)
-        }
-    };
-
-    (@count_position_impl $target:ident, $count:expr;) => {
-        $count // Fallback, should not happen in correct usage
-    };
-
-    // Create simple variant (only for variants without fields)
-    (@create_simple_variant $enum_name:ident::$variant:ident) => {
-        Some($enum_name::$variant)
-    };
 }
 
 #[cfg(test)]
