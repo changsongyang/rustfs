@@ -261,6 +261,97 @@ macro_rules! define_error_codes {
     };
 }
 
+/// Helper macro to automatically generate error codes based on enum variant order
+///
+/// This macro eliminates the need to manually define error codes by automatically
+/// assigning sequential codes starting from 0x0001 based on the enum definition order.
+///
+/// # Example
+///
+/// ```rust
+/// use rustfs_utils::error_codes::{auto_error_codes, error_types};
+///
+/// #[derive(Debug)]
+/// enum MyError {
+///     NotFound,
+///     InvalidInput,
+///     Timeout,
+/// }
+///
+/// auto_error_codes! {
+///     error_type: error_types::SYSTEM,
+///     enum_name: MyError,
+///     variants: [
+///         NotFound,
+///         InvalidInput,
+///         Timeout,
+///     ]
+/// }
+/// ```
+#[macro_export]
+macro_rules! auto_error_codes {
+    (
+        error_type: $error_type:expr,
+        enum_name: $enum_name:ident,
+        variants: [
+            $($variant:ident),* $(,)?
+        ]
+    ) => {
+        impl $crate::error_codes::ToErrorCode for $enum_name {
+            fn to_error_code(&self) -> $crate::error_codes::ErrorCode {
+                let specific_code = match self {
+                    $(
+                        $enum_name::$variant $(..)? => {
+                            $crate::auto_error_codes!(@count_position $variant; $($variant),*)
+                        }
+                    )*
+                };
+
+                $crate::error_codes::ErrorCode::new($error_type, specific_code)
+            }
+        }
+
+        impl $crate::error_codes::FromErrorCode<$enum_name> for $enum_name {
+            fn from_error_code(code: $crate::error_codes::ErrorCode) -> Option<$enum_name> {
+                if code.error_type() != $error_type {
+                    return None;
+                }
+
+                match code.specific_code() {
+                    $(
+                        $crate::auto_error_codes!(@count_position $variant; $($variant),*) => {
+                            $crate::auto_error_codes!(@create_simple_variant $enum_name::$variant)
+                        }
+                    )*
+                    _ => None,
+                }
+            }
+        }
+    };
+
+    // Count the position of a variant in the list (1-based)
+    (@count_position $target:ident; $($variant:ident),*) => {
+        $crate::auto_error_codes!(@count_position_impl $target, 1; $($variant),*)
+    };
+
+    (@count_position_impl $target:ident, $count:expr; $first:ident $(, $rest:ident)*) => {
+        if stringify!($target) == stringify!($first) {
+            $count
+        } else {
+            $crate::auto_error_codes!(@count_position_impl $target, $count + 1; $($rest),*)
+        }
+    };
+
+    (@count_position_impl $target:ident, $count:expr;) => {
+        $count // Fallback, should not happen in correct usage
+    };
+
+    // Create simple variant (only for variants without fields)
+    (@create_simple_variant $enum_name:ident::$variant:ident) => {
+        Some($enum_name::$variant)
+    };
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

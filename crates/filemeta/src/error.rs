@@ -69,35 +69,30 @@ pub enum Error {
     UuidParse(String),
 }
 
-// Define error codes for this module
-pub mod error_codes {
-    // Basic errors
-    pub const FILE_NOT_FOUND: u16 = 0x0001;
-    pub const FILE_VERSION_NOT_FOUND: u16 = 0x0002;
-    pub const VOLUME_NOT_FOUND: u16 = 0x0003;
-    pub const FILE_CORRUPT: u16 = 0x0004;
-    pub const METHOD_NOT_ALLOWED: u16 = 0x0005;
-    pub const UNEXPECTED: u16 = 0x0006;
-
-    // Module-specific errors
-    pub const DONE_FOR_NOW: u16 = 0x0010;
-
-    // I/O related errors
-    pub const IO_ERROR: u16 = 0x0100;
-
-    // Serialization errors
-    pub const RMP_SERDE_DECODE: u16 = 0x0300;
-    pub const RMP_SERDE_ENCODE: u16 = 0x0301;
-    pub const FROM_UTF8: u16 = 0x0302;
-    pub const RMP_DECODE_VALUE_READ: u16 = 0x0303;
-    pub const RMP_ENCODE_VALUE_WRITE: u16 = 0x0304;
-    pub const RMP_DECODE_NUM_VALUE_READ: u16 = 0x0305;
-    pub const RMP_DECODE_MARKER_READ: u16 = 0x0306;
-    pub const TIME_COMPONENT_RANGE: u16 = 0x0307;
-    pub const UUID_PARSE: u16 = 0x0308;
-}
-
 impl Error {
+    /// Get the variant index based on enum definition order (1-based)
+    fn variant_index(&self) -> u16 {
+        match self {
+            Error::FileNotFound => 1,
+            Error::FileVersionNotFound => 2,
+            Error::VolumeNotFound => 3,
+            Error::FileCorrupt => 4,
+            Error::DoneForNow => 5,
+            Error::MethodNotAllowed => 6,
+            Error::Unexpected => 7,
+            Error::Io(_) => 8,
+            Error::RmpSerdeDecode(_) => 9,
+            Error::RmpSerdeEncode(_) => 10,
+            Error::FromUtf8(_) => 11,
+            Error::RmpDecodeValueRead(_) => 12,
+            Error::RmpEncodeValueWrite(_) => 13,
+            Error::RmpDecodeNumValueRead(_) => 14,
+            Error::RmpDecodeMarkerRead(_) => 15,
+            Error::TimeComponentRange(_) => 16,
+            Error::UuidParse(_) => 17,
+        }
+    }
+
     pub fn other<E>(error: E) -> Error
     where
         E: Into<Box<dyn std::error::Error + Send + Sync>>,
@@ -128,26 +123,8 @@ impl Error {
 
 impl ToErrorCode for Error {
     fn to_error_code(&self) -> ErrorCode {
-        let specific_code = match self {
-            Error::FileNotFound => error_codes::FILE_NOT_FOUND,
-            Error::FileVersionNotFound => error_codes::FILE_VERSION_NOT_FOUND,
-            Error::VolumeNotFound => error_codes::VOLUME_NOT_FOUND,
-            Error::FileCorrupt => error_codes::FILE_CORRUPT,
-            Error::DoneForNow => error_codes::DONE_FOR_NOW,
-            Error::MethodNotAllowed => error_codes::METHOD_NOT_ALLOWED,
-            Error::Unexpected => error_codes::UNEXPECTED,
-            Error::Io(_) => error_codes::IO_ERROR,
-            Error::RmpSerdeDecode(_) => error_codes::RMP_SERDE_DECODE,
-            Error::RmpSerdeEncode(_) => error_codes::RMP_SERDE_ENCODE,
-            Error::FromUtf8(_) => error_codes::FROM_UTF8,
-            Error::RmpDecodeValueRead(_) => error_codes::RMP_DECODE_VALUE_READ,
-            Error::RmpEncodeValueWrite(_) => error_codes::RMP_ENCODE_VALUE_WRITE,
-            Error::RmpDecodeNumValueRead(_) => error_codes::RMP_DECODE_NUM_VALUE_READ,
-            Error::RmpDecodeMarkerRead(_) => error_codes::RMP_DECODE_MARKER_READ,
-            Error::TimeComponentRange(_) => error_codes::TIME_COMPONENT_RANGE,
-            Error::UuidParse(_) => error_codes::UUID_PARSE,
-        };
-
+        // Use the variant index as the specific code
+        let specific_code = self.variant_index();
         ErrorCode::new(error_types::FILEMETA, specific_code)
     }
 }
@@ -158,26 +135,26 @@ impl FromErrorCode<Error> for Error {
             return None;
         }
 
+        // This is a simplified approach - in practice, you might want to maintain
+        // a mapping or use a different strategy for variants with data
         match code.specific_code() {
-            error_codes::FILE_NOT_FOUND => Some(Error::FileNotFound),
-            error_codes::FILE_VERSION_NOT_FOUND => Some(Error::FileVersionNotFound),
-            error_codes::VOLUME_NOT_FOUND => Some(Error::VolumeNotFound),
-            error_codes::FILE_CORRUPT => Some(Error::FileCorrupt),
-            error_codes::DONE_FOR_NOW => Some(Error::DoneForNow),
-            error_codes::METHOD_NOT_ALLOWED => Some(Error::MethodNotAllowed),
-            error_codes::UNEXPECTED => Some(Error::Unexpected),
-            error_codes::IO_ERROR => Some(Error::Io(std::io::Error::other("I/O error"))),
-            error_codes::RMP_SERDE_DECODE => Some(Error::RmpSerdeDecode("rmp serde decode error".to_string())),
-            error_codes::RMP_SERDE_ENCODE => Some(Error::RmpSerdeEncode("rmp serde encode error".to_string())),
-            error_codes::FROM_UTF8 => Some(Error::FromUtf8("UTF-8 error".to_string())),
-            error_codes::RMP_DECODE_VALUE_READ => Some(Error::RmpDecodeValueRead("rmp decode value read error".to_string())),
-            error_codes::RMP_ENCODE_VALUE_WRITE => Some(Error::RmpEncodeValueWrite("rmp encode value write error".to_string())),
-            error_codes::RMP_DECODE_NUM_VALUE_READ => {
-                Some(Error::RmpDecodeNumValueRead("rmp decode num value read error".to_string()))
-            }
-            error_codes::RMP_DECODE_MARKER_READ => Some(Error::RmpDecodeMarkerRead("rmp decode marker read error".to_string())),
-            error_codes::TIME_COMPONENT_RANGE => Some(Error::TimeComponentRange("time component range error".to_string())),
-            error_codes::UUID_PARSE => Some(Error::UuidParse("uuid parse error".to_string())),
+            1 => Some(Error::FileNotFound),
+            2 => Some(Error::FileVersionNotFound),
+            3 => Some(Error::VolumeNotFound),
+            4 => Some(Error::FileCorrupt),
+            5 => Some(Error::DoneForNow),
+            6 => Some(Error::MethodNotAllowed),
+            7 => Some(Error::Unexpected),
+            8 => Some(Error::Io(std::io::Error::other("I/O error"))),
+            9 => Some(Error::RmpSerdeDecode("rmp serde decode error".to_string())),
+            10 => Some(Error::RmpSerdeEncode("rmp serde encode error".to_string())),
+            11 => Some(Error::FromUtf8("UTF-8 error".to_string())),
+            12 => Some(Error::RmpDecodeValueRead("rmp decode value read error".to_string())),
+            13 => Some(Error::RmpEncodeValueWrite("rmp encode value write error".to_string())),
+            14 => Some(Error::RmpDecodeNumValueRead("rmp decode num value read error".to_string())),
+            15 => Some(Error::RmpDecodeMarkerRead("rmp decode marker read error".to_string())),
+            16 => Some(Error::TimeComponentRange("time component range error".to_string())),
+            17 => Some(Error::UuidParse("uuid parse error".to_string())),
             _ => None,
         }
     }
@@ -684,6 +661,70 @@ mod tests {
                 assert_eq!(orig_io.to_string(), cloned_io.to_string());
             }
             _ => panic!("Both should be Io variants"),
+        }
+    }
+
+    #[test]
+    fn test_error_code_auto_generation() {
+        // Test that error codes are generated automatically based on enum variant order
+        let test_cases = vec![
+            (Error::FileNotFound, 1),
+            (Error::FileVersionNotFound, 2),
+            (Error::VolumeNotFound, 3),
+            (Error::FileCorrupt, 4),
+            (Error::DoneForNow, 5),
+            (Error::MethodNotAllowed, 6),
+            (Error::Unexpected, 7),
+            (Error::Io(std::io::Error::new(std::io::ErrorKind::Other, "test")), 8),
+            (Error::RmpSerdeDecode("test".to_string()), 9),
+            (Error::RmpSerdeEncode("test".to_string()), 10),
+            (Error::FromUtf8("test".to_string()), 11),
+            (Error::RmpDecodeValueRead("test".to_string()), 12),
+            (Error::RmpEncodeValueWrite("test".to_string()), 13),
+            (Error::RmpDecodeNumValueRead("test".to_string()), 14),
+            (Error::RmpDecodeMarkerRead("test".to_string()), 15),
+            (Error::TimeComponentRange("test".to_string()), 16),
+            (Error::UuidParse("test".to_string()), 17),
+        ];
+
+        for (error, expected_code) in test_cases {
+            let error_code = error.to_error_code();
+            assert_eq!(error_code.error_type(), error_types::FILEMETA);
+            assert_eq!(error_code.specific_code(), expected_code);
+
+            // Test round-trip conversion
+            let reconstructed = Error::from_error_code(error_code);
+            assert!(reconstructed.is_some());
+        }
+    }
+
+    #[test]
+    fn test_error_code_uniqueness() {
+        // Test that all error variants have unique codes
+        let errors = vec![
+            Error::FileNotFound,
+            Error::FileVersionNotFound,
+            Error::VolumeNotFound,
+            Error::FileCorrupt,
+            Error::DoneForNow,
+            Error::MethodNotAllowed,
+            Error::Unexpected,
+            Error::Io(std::io::Error::new(std::io::ErrorKind::Other, "test")),
+            Error::RmpSerdeDecode("test".to_string()),
+            Error::RmpSerdeEncode("test".to_string()),
+            Error::FromUtf8("test".to_string()),
+            Error::RmpDecodeValueRead("test".to_string()),
+            Error::RmpEncodeValueWrite("test".to_string()),
+            Error::RmpDecodeNumValueRead("test".to_string()),
+            Error::RmpDecodeMarkerRead("test".to_string()),
+            Error::TimeComponentRange("test".to_string()),
+            Error::UuidParse("test".to_string()),
+        ];
+
+        let mut codes = std::collections::HashSet::new();
+        for error in errors {
+            let code = error.to_error_code().specific_code();
+            assert!(codes.insert(code), "Duplicate error code found: {}", code);
         }
     }
 }
