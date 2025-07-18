@@ -50,27 +50,25 @@ impl AutoErrorCode for Error {
 
     fn variant_index(&self) -> u16 {
         match self {
+            Error::Io(_) => 0,
             Error::FileNotFound => 1,
             Error::FileVersionNotFound => 2,
-            // Error::VolumeNotFound => 3,
-            Error::FileCorrupt => 4,
-            Error::DoneForNow => 5,
-            Error::MethodNotAllowed => 6,
-            Error::Unexpected => 7,
-            Error::Io(_) => 8,
+            Error::FileCorrupt => 3,
+            Error::DoneForNow => 4,
+            Error::MethodNotAllowed => 5,
+            Error::Unexpected => 6,
         }
     }
 
     fn from_variant_index(index: u16) -> Option<Self> {
         match index {
+            0 => Some(Error::Io(std::io::Error::other("I/O error"))),
             1 => Some(Error::FileNotFound),
             2 => Some(Error::FileVersionNotFound),
-            // 3 => Some(Error::VolumeNotFound),
-            4 => Some(Error::FileCorrupt),
-            5 => Some(Error::DoneForNow),
-            6 => Some(Error::MethodNotAllowed),
-            7 => Some(Error::Unexpected),
-            8 => Some(Error::Io(std::io::Error::other("I/O error"))),
+            3 => Some(Error::FileCorrupt),
+            4 => Some(Error::DoneForNow),
+            5 => Some(Error::MethodNotAllowed),
+            6 => Some(Error::Unexpected),
             _ => None,
         }
     }

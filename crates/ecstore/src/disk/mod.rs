@@ -18,6 +18,7 @@ pub mod error_conv;
 pub mod error_reduce;
 pub mod format;
 pub mod fs;
+pub mod list_path;
 pub mod local;
 pub mod os;
 

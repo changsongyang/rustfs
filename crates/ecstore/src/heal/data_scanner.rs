@@ -61,11 +61,11 @@ use crate::{
     heal::data_usage::DATA_USAGE_ROOT,
 };
 use crate::{
-    cache_value::metacache_set::{ListPathRawOptions, list_path_raw},
     config::{
         com::{read_config, save_config},
         heal::Config,
     },
+    disk::list_path::{ListPathRawOptions, list_path_raw},
     disk::{DiskInfoOptions, DiskStore},
     global::{GLOBAL_BackgroundHealState, GLOBAL_IsErasure, GLOBAL_IsErasureSD},
     heal::{

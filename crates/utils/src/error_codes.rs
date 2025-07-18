@@ -254,6 +254,16 @@ pub trait AutoErrorCode: Sized {
 
     /// Create an error from a variant index
     fn from_variant_index(index: u16) -> Option<Self>;
+
+    /// Get the error code using the new u32 format
+    fn code(&self) -> u32 {
+        self.to_error_code().as_u32()
+    }
+
+    /// Create an error from a u32 code
+    fn from_code(code: u32) -> Option<Self> {
+        Self::from_error_code(ErrorCode::from_u32(code))
+    }
 }
 
 /// Blanket implementation of ToErrorCode for types that implement AutoErrorCode

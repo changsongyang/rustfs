@@ -15,23 +15,12 @@
 use crate::disk::error::{Error, Result};
 use rustfs_filemeta::rmp::{self, RmpReader, RmpWriter};
 use rustfs_filemeta::{FileInfo, FileInfoVersions, FileMeta, FileMetaShallowVersion, VersionType, merge_file_meta_versions};
+use rustfs_utils::error_codes::{AutoErrorCode as _, ToErrorCode};
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
-use std::{
-    fmt::Debug,
-    future::Future,
-    pin::Pin,
-    ptr,
-    sync::{
-        Arc,
-        atomic::{AtomicPtr, AtomicU64, Ordering as AtomicOrdering},
-    },
-    time::{Duration, SystemTime, UNIX_EPOCH},
-};
+use std::fmt::Debug;
 use time::OffsetDateTime;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use tokio::spawn;
-use tokio::sync::Mutex;
 use tracing::warn;
 
 const SLASH_SEPARATOR: &str = "/";
@@ -88,11 +77,8 @@ pub struct MetaCacheEntry {
     /// Entries without metadata will only be present in non-recursive scans.
     pub metadata: Vec<u8>,
 
-    /// err_no is the error number if the entry is not valid.
-    pub err_no: u32,
-
-    /// err_msg is the error message if the entry is not valid.
-    pub err_msg: String,
+    #[serde(skip)]
+    pub error: Option<Error>,
 
     /// cached contains the metadata if decoded.
     #[serde(skip)]
@@ -112,12 +98,14 @@ impl MetaCacheEntry {
         rmp::write_bin(w, &self.metadata)
             .await
             .map_err(|e| Error::other(e.to_string()))?;
-        rmp::write_u32(w, self.err_no)
-            .await
-            .map_err(|e| Error::other(e.to_string()))?;
-        rmp::write_str(w, &self.err_msg)
-            .await
-            .map_err(|e| Error::other(e.to_string()))?;
+
+        let (err_no, err_msg) = match &self.error {
+            Some(err) => (err.code(), err.to_string()),
+            None => (0, "".to_owned()),
+        };
+
+        rmp::write_u32(w, err_no).await.map_err(|e| Error::other(e.to_string()))?;
+        rmp::write_str(w, &err_msg).await.map_err(|e| Error::other(e.to_string()))?;
         Ok(())
     }
 
@@ -146,12 +134,13 @@ impl MetaCacheEntry {
             .map_err(|e| Error::other(e.to_string()))
             .map(|s| s.to_owned())?;
 
+        let error = Error::from_code(err_no).map(|v| if matches!(v, Error::Io(_)) { Error::other(err_msg) } else { v });
+
         Ok(Self {
             msg_type: MetaCacheEntryType::from_u8(msg_type),
             name,
             metadata,
-            err_no,
-            err_msg,
+            error,
             cached: None,
             reusable: false,
         })
@@ -207,13 +196,13 @@ impl MetaCacheEntry {
         }
 
         match self.xl_meta() {
-            Ok(res) => {
+            Some(res) => {
                 if res.versions.is_empty() {
                     return true;
                 }
                 res.versions[0].header.version_type == VersionType::Delete
             }
-            Err(_) => true,
+            None => true,
         }
     }
 
@@ -362,21 +351,21 @@ impl MetaCacheEntry {
         (prefer, true)
     }
 
-    pub fn xl_meta(&mut self) -> Result<FileMeta> {
+    pub fn xl_meta(&mut self) -> Option<FileMeta> {
         if self.is_dir() {
-            return Err(Error::FileNotFound);
+            return None;
         }
 
         if let Some(meta) = &self.cached {
-            Ok(meta.clone())
+            Some(meta.clone())
         } else {
             if self.metadata.is_empty() {
-                return Err(Error::FileNotFound);
+                return None;
             }
 
-            let meta = FileMeta::load(&self.metadata)?;
+            let meta = FileMeta::load(&self.metadata).ok()?;
             self.cached = Some(meta.clone());
-            Ok(meta)
+            Some(meta)
         }
     }
 }
@@ -418,9 +407,9 @@ impl MetaCacheEntries {
             }
 
             let xl = match entry.xl_meta() {
-                Ok(xl) => xl,
-                Err(e) => {
-                    warn!("decommission_pool: entries resolve entry xl_meta {:?}", e);
+                Some(xl) => xl,
+                None => {
+                    warn!("decommission_pool: entries resolve entry xl_meta not found");
                     continue;
                 }
             };
@@ -653,7 +642,7 @@ impl<R: AsyncRead + Unpin + Send + Sync> MetacacheReader<R> {
     }
 
     async fn read_version(&mut self) -> Result<u8> {
-        rmp::read_pfix(&mut self.rd).await.map_err(|e| e.into())
+        rmp::read_pfix(&mut self.rd).await.map_err(Error::other)
     }
 
     async fn check_init(&mut self) -> Result<()> {
@@ -762,113 +751,6 @@ impl<R: AsyncRead + Unpin + Send + Sync> MetacacheReader<R> {
         }
 
         Ok(ret)
-    }
-}
-
-pub type UpdateFn<T> = Box<dyn Fn() -> Pin<Box<dyn Future<Output = std::io::Result<T>> + Send>> + Send + Sync + 'static>;
-
-#[derive(Clone, Debug, Default)]
-pub struct Opts {
-    pub return_last_good: bool,
-    pub no_wait: bool,
-}
-
-pub struct Cache<T: Clone + Debug + Send> {
-    update_fn: UpdateFn<T>,
-    ttl: Duration,
-    opts: Opts,
-    val: AtomicPtr<T>,
-    last_update_ms: AtomicU64,
-    updating: Arc<Mutex<bool>>,
-}
-
-impl<T: Clone + Debug + Send + 'static> Cache<T> {
-    pub fn new(update_fn: UpdateFn<T>, ttl: Duration, opts: Opts) -> Self {
-        let val = AtomicPtr::new(ptr::null_mut());
-        Self {
-            update_fn,
-            ttl,
-            opts,
-            val,
-            last_update_ms: AtomicU64::new(0),
-            updating: Arc::new(Mutex::new(false)),
-        }
-    }
-
-    #[allow(unsafe_code)]
-    pub async fn get(self: Arc<Self>) -> std::io::Result<T> {
-        let v_ptr = self.val.load(AtomicOrdering::SeqCst);
-        let v = if v_ptr.is_null() {
-            None
-        } else {
-            Some(unsafe { (*v_ptr).clone() })
-        };
-
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("Time went backwards")
-            .as_secs();
-        if now - self.last_update_ms.load(AtomicOrdering::SeqCst) < self.ttl.as_secs() {
-            if let Some(v) = v {
-                return Ok(v);
-            }
-        }
-
-        if self.opts.no_wait && v.is_some() && now - self.last_update_ms.load(AtomicOrdering::SeqCst) < self.ttl.as_secs() * 2 {
-            if self.updating.try_lock().is_ok() {
-                let this = Arc::clone(&self);
-                spawn(async move {
-                    let _ = this.update().await;
-                });
-            }
-
-            return Ok(v.unwrap());
-        }
-
-        let _ = self.updating.lock().await;
-
-        if let Ok(duration) =
-            SystemTime::now().duration_since(UNIX_EPOCH + Duration::from_secs(self.last_update_ms.load(AtomicOrdering::SeqCst)))
-        {
-            if duration < self.ttl {
-                return Ok(v.unwrap());
-            }
-        }
-
-        match self.update().await {
-            Ok(_) => {
-                let v_ptr = self.val.load(AtomicOrdering::SeqCst);
-                let v = if v_ptr.is_null() {
-                    None
-                } else {
-                    Some(unsafe { (*v_ptr).clone() })
-                };
-                Ok(v.unwrap())
-            }
-            Err(err) => Err(err),
-        }
-    }
-
-    async fn update(&self) -> std::io::Result<()> {
-        match (self.update_fn)().await {
-            Ok(val) => {
-                self.val.store(Box::into_raw(Box::new(val)), AtomicOrdering::SeqCst);
-                let now = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .expect("Time went backwards")
-                    .as_secs();
-                self.last_update_ms.store(now, AtomicOrdering::SeqCst);
-                Ok(())
-            }
-            Err(err) => {
-                let v_ptr = self.val.load(AtomicOrdering::SeqCst);
-                if self.opts.return_last_good && !v_ptr.is_null() {
-                    return Ok(());
-                }
-
-                Err(err)
-            }
-        }
     }
 }
 

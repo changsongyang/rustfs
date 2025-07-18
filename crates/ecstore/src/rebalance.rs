@@ -13,10 +13,10 @@
 // limitations under the License.
 
 use crate::StorageAPI;
-use crate::cache_value::metacache_set::{ListPathRawOptions, list_path_raw};
 use crate::cache_value::{MetaCacheEntries, MetaCacheEntry, MetadataResolutionParams};
 use crate::config::com::{read_config_with_metadata, save_config_with_opts};
 use crate::disk::error::DiskError;
+use crate::disk::list_path::{ListPathRawOptions, list_path_raw};
 use crate::error::{Error, Result};
 use crate::error::{is_err_data_movement_overwrite, is_err_object_not_found, is_err_version_not_found};
 use crate::global::get_global_endpoints;

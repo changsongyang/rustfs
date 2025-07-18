@@ -15,11 +15,11 @@
 use crate::StorageAPI;
 use crate::bucket::metadata_sys::get_versioning_config;
 use crate::bucket::versioning::VersioningApi;
-use crate::cache_value::metacache_set::{ListPathRawOptions, list_path_raw};
 use crate::cache_value::{
     MetaCacheEntries, MetaCacheEntriesSorted, MetaCacheEntriesSortedResult, MetaCacheEntry, MetadataResolutionParams,
 };
 use crate::disk::error::DiskError;
+use crate::disk::list_path::{ListPathRawOptions, list_path_raw};
 use crate::disk::{DiskInfo, DiskStore};
 use crate::error::{
     Error, Result, StorageError, is_all_not_found, is_all_volume_not_found, is_err_bucket_not_found, to_object_err,
@@ -1166,7 +1166,7 @@ async fn merge_entry_channels(
             if let Some(entry) = &best {
                 let mut versions = Vec::with_capacity(to_merge.len() + 1);
 
-                let mut has_xl = { entry.clone().xl_meta().ok() };
+                let mut has_xl = { entry.clone().xl_meta() };
 
                 if let Some(x) = &has_xl {
                     versions.push(x.versions.clone());
@@ -1177,8 +1177,8 @@ async fn merge_entry_channels(
 
                     if let Some(Some(entry)) = has_entry {
                         let xl2 = match entry.clone().xl_meta() {
-                            Ok(res) => res,
-                            Err(_) => {
+                            Some(res) => res,
+                            None => {
                                 select_from(&mut in_channels, idx, &mut top, &mut n_done).await?;
 
                                 continue;

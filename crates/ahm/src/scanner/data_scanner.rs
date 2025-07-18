@@ -621,7 +621,7 @@ impl Scanner {
                 debug!("Scanned object: {}", entry.name);
 
                 // Parse object metadata
-                if let Ok(file_meta) = entry.xl_meta() {
+                if let Some(file_meta) = entry.xl_meta() {
                     if file_meta.versions.is_empty() {
                         objects_with_issues += 1;
                         warn!("Object {} has no versions", entry.name);

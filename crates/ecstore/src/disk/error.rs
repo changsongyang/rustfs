@@ -13,6 +13,7 @@
 // limitations under the License.
 
 // use crate::quorum::CheckErrorFn;
+use rustfs_utils::error_codes::{AutoErrorCode, error_types};
 use std::hash::{Hash, Hasher};
 use std::io::{self};
 use std::path::PathBuf;
@@ -217,6 +218,102 @@ impl DiskError {
     //         false
     //     }
     // }
+}
+
+// Implement AutoErrorCode trait directly
+impl AutoErrorCode for DiskError {
+    fn error_type() -> u16 {
+        error_types::DISK
+    }
+
+    fn variant_index(&self) -> u16 {
+        match self {
+            DiskError::Io(_) => 0,
+            DiskError::MaxVersionsExceeded => 1,
+            DiskError::Unexpected => 2,
+            DiskError::CorruptedFormat => 3,
+            DiskError::CorruptedBackend => 4,
+            DiskError::UnformattedDisk => 5,
+            DiskError::InconsistentDisk => 6,
+            DiskError::UnsupportedDisk => 7,
+            DiskError::DiskFull => 8,
+            DiskError::DiskNotDir => 9,
+            DiskError::DiskNotFound => 10,
+            DiskError::DiskOngoingReq => 11,
+            DiskError::DriveIsRoot => 12,
+            DiskError::FaultyRemoteDisk => 13,
+            DiskError::FaultyDisk => 14,
+            DiskError::DiskAccessDenied => 15,
+            DiskError::FileNotFound => 16,
+            DiskError::FileVersionNotFound => 17,
+            DiskError::TooManyOpenFiles => 18,
+            DiskError::FileNameTooLong => 19,
+            DiskError::VolumeExists => 20,
+            DiskError::IsNotRegular => 21,
+            DiskError::PathNotFound => 22,
+            DiskError::VolumeNotFound => 23,
+            DiskError::VolumeNotEmpty => 24,
+            DiskError::VolumeAccessDenied => 25,
+            DiskError::FileAccessDenied => 26,
+            DiskError::FileCorrupt => 27,
+            DiskError::ShortWrite => 28,
+            DiskError::BitrotHashAlgoInvalid => 29,
+            DiskError::CrossDeviceLink => 30,
+            DiskError::LessData => 31,
+            DiskError::MoreData => 32,
+            DiskError::OutdatedXLMeta => 33,
+            DiskError::PartMissingOrCorrupt => 34,
+            DiskError::NoHealRequired => 35,
+            DiskError::MethodNotAllowed => 36,
+            DiskError::ErasureWriteQuorum => 37,
+            DiskError::ErasureReadQuorum => 38,
+        }
+    }
+
+    fn from_variant_index(index: u16) -> Option<Self> {
+        match index {
+            0 => Some(DiskError::Io(std::io::Error::other("I/O error"))),
+            1 => Some(DiskError::MaxVersionsExceeded),
+            2 => Some(DiskError::Unexpected),
+            3 => Some(DiskError::CorruptedFormat),
+            4 => Some(DiskError::CorruptedBackend),
+            5 => Some(DiskError::UnformattedDisk),
+            6 => Some(DiskError::InconsistentDisk),
+            7 => Some(DiskError::UnsupportedDisk),
+            8 => Some(DiskError::DiskFull),
+            9 => Some(DiskError::DiskNotDir),
+            10 => Some(DiskError::DiskNotFound),
+            11 => Some(DiskError::DiskOngoingReq),
+            12 => Some(DiskError::DriveIsRoot),
+            13 => Some(DiskError::FaultyRemoteDisk),
+            14 => Some(DiskError::FaultyDisk),
+            15 => Some(DiskError::DiskAccessDenied),
+            16 => Some(DiskError::FileNotFound),
+            17 => Some(DiskError::FileVersionNotFound),
+            18 => Some(DiskError::TooManyOpenFiles),
+            19 => Some(DiskError::FileNameTooLong),
+            20 => Some(DiskError::VolumeExists),
+            21 => Some(DiskError::IsNotRegular),
+            22 => Some(DiskError::PathNotFound),
+            23 => Some(DiskError::VolumeNotFound),
+            24 => Some(DiskError::VolumeNotEmpty),
+            25 => Some(DiskError::VolumeAccessDenied),
+            26 => Some(DiskError::FileAccessDenied),
+            27 => Some(DiskError::FileCorrupt),
+            28 => Some(DiskError::ShortWrite),
+            29 => Some(DiskError::BitrotHashAlgoInvalid),
+            30 => Some(DiskError::CrossDeviceLink),
+            31 => Some(DiskError::LessData),
+            32 => Some(DiskError::MoreData),
+            33 => Some(DiskError::OutdatedXLMeta),
+            34 => Some(DiskError::PartMissingOrCorrupt),
+            35 => Some(DiskError::NoHealRequired),
+            36 => Some(DiskError::MethodNotAllowed),
+            37 => Some(DiskError::ErasureWriteQuorum),
+            38 => Some(DiskError::ErasureReadQuorum),
+            _ => None,
+        }
+    }
 }
 
 impl From<rustfs_filemeta::Error> for DiskError {

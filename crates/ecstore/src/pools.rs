@@ -13,10 +13,10 @@
 // limitations under the License.
 
 use crate::bucket::versioning_sys::BucketVersioningSys;
-use crate::cache_value::metacache_set::{ListPathRawOptions, list_path_raw};
 use crate::cache_value::{MetaCacheEntries, MetaCacheEntry, MetadataResolutionParams};
 use crate::config::com::{CONFIG_PREFIX, read_config, save_config};
 use crate::disk::error::DiskError;
+use crate::disk::list_path::{ListPathRawOptions, list_path_raw};
 use crate::disk::{BUCKET_META_PREFIX, RUSTFS_META_BUCKET};
 use crate::error::{Error, Result};
 use crate::error::{

@@ -12,8 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// pub mod cache;
+pub mod cache;
 pub mod metacache;
-pub mod metacache_set;
+// pub mod metacache_set;
 
+pub use cache::*;
 pub use metacache::*;

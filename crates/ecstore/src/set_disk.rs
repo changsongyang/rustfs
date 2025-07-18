@@ -19,6 +19,7 @@ use crate::bucket::lifecycle::lifecycle::TRANSITION_COMPLETE;
 use crate::cache_value::{MetaCacheEntries, MetaCacheEntry, MetadataResolutionParams};
 use crate::client::{object_api_utils::extract_etag, transition_api::ReaderImpl};
 use crate::disk::error_reduce::{OBJECT_OP_IGNORED_ERRS, reduce_read_quorum_errs, reduce_write_quorum_errs};
+use crate::disk::list_path::{ListPathRawOptions, list_path_raw};
 use crate::disk::{
     self, CHECK_PART_DISK_NOT_FOUND, CHECK_PART_FILE_CORRUPT, CHECK_PART_FILE_NOT_FOUND, CHECK_PART_SUCCESS,
     conv_part_err_to_int, has_part_err,
@@ -34,7 +35,6 @@ use crate::heal::heal_ops::{HealEntryFn, HealSequence};
 use crate::store_api::{ListPartsInfo, ObjectToDelete};
 use crate::{
     bucket::lifecycle::bucket_lifecycle_ops::{gen_transition_objname, get_transitioned_object_reader, put_restore_opts},
-    cache_value::metacache_set::{ListPathRawOptions, list_path_raw},
     config::{GLOBAL_StorageClass, storageclass},
     disk::{
         CheckPartsResp, DeleteOptions, DiskAPI, DiskInfo, DiskInfoOptions, DiskOption, DiskStore, FileInfoVersions,

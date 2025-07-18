@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::metacache::{MetaCacheEntries, MetaCacheEntry, MetacacheReader};
+use crate::cache_value::{MetaCacheEntries, MetaCacheEntry, MetacacheReader};
 use crate::disk::error::{DiskError, is_io_eof};
 
 use crate::disk::{self, DiskAPI, DiskStore, WalkDirOptions};
