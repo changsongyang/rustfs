@@ -13,11 +13,10 @@
 // limitations under the License.
 
 use crate::error::{Error, Result};
-use crate::rmp::RmpReader;
+use crate::rmp::{self, RmpReader, RmpWriter};
 use crate::{FileInfo, FileInfoVersions, FileMeta, FileMetaShallowVersion, VersionType, merge_file_meta_versions};
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
-use std::str::from_utf8;
 use std::{
     fmt::Debug,
     future::Future,
@@ -105,6 +104,59 @@ pub struct MetaCacheEntry {
 }
 
 impl MetaCacheEntry {
+    pub async fn write_to<W: RmpWriter>(&self, w: &mut W) -> Result<()> {
+        rmp::write_pfix(w, self.msg_type.to_u8())
+            .await
+            .map_err(|e| Error::other(e.to_string()))?;
+        rmp::write_str(w, &self.name).await.map_err(|e| Error::other(e.to_string()))?;
+        rmp::write_bin(w, &self.metadata)
+            .await
+            .map_err(|e| Error::other(e.to_string()))?;
+        rmp::write_u32(w, self.err_no)
+            .await
+            .map_err(|e| Error::other(e.to_string()))?;
+        rmp::write_str(w, &self.err_msg)
+            .await
+            .map_err(|e| Error::other(e.to_string()))?;
+        Ok(())
+    }
+
+    pub async fn read_from<R: RmpReader>(rd: &mut R) -> Result<Self> {
+        let msg_type = rmp::read_pfix(rd).await.map_err(|e| Error::other(format!("{e:?}")))?;
+
+        let name_len = rmp::read_str_len(rd).await.map_err(|e| Error::other(format!("{e:?}")))?;
+        let mut name_buf = vec![0; name_len as usize];
+        let name = rmp::read_str_data(rd, name_len, &mut name_buf)
+            .await
+            .map_err(|e| Error::other(e.to_string()))
+            .map(|s| s.to_owned())?;
+
+        let metadata_len = rmp::read_bin_len(rd).await.map_err(|e| Error::other(format!("{e:?}")))?;
+        let mut metadata = vec![0; metadata_len as usize];
+        rmp::read_bytes_data(rd, metadata_len, &mut metadata)
+            .await
+            .map_err(|e| Error::other(e.to_string()))?;
+
+        let err_no = rmp::read_u32(rd).await.map_err(|e| Error::other(format!("{e:?}")))?;
+
+        let err_len = rmp::read_str_len(rd).await.map_err(|e| Error::other(format!("{e:?}")))?;
+        let mut err_buf = vec![0; err_len as usize];
+        let err_msg = rmp::read_str_data(rd, err_len, &mut err_buf)
+            .await
+            .map_err(|e| Error::other(e.to_string()))
+            .map(|s| s.to_owned())?;
+
+        Ok(Self {
+            msg_type: MetaCacheEntryType::from_u8(msg_type),
+            name,
+            metadata,
+            err_no,
+            err_msg,
+            cached: None,
+            reusable: false,
+        })
+    }
+
     pub fn is_dir(&self) -> bool {
         self.metadata.is_empty() && self.name.ends_with('/')
     }
@@ -492,22 +544,21 @@ const METACACHE_STREAM_VERSION_V1: u8 = 1;
 pub struct MetacacheWriter<W> {
     wr: W,
     created: bool,
-    buf: Vec<u8>,
 }
 
-impl<W: AsyncWrite + Unpin> MetacacheWriter<W> {
-    pub fn new(wr: W) -> Self {
-        Self {
-            wr,
-            created: false,
-            buf: Vec::new(),
-        }
-    }
+#[async_trait::async_trait]
+impl<W: AsyncWrite + Unpin + Send + Sync> RmpWriter for MetacacheWriter<W> {
+    type Error = std::io::Error;
 
-    pub async fn flush(&mut self) -> Result<()> {
-        self.wr.write_all(&self.buf).await?;
-        self.buf.clear();
+    async fn write_bytes(&mut self, buf: &[u8]) -> std::result::Result<(), Self::Error> {
+        self.wr.write_all(buf).await?;
         Ok(())
+    }
+}
+
+impl<W: AsyncWrite + Unpin + Send + Sync> MetacacheWriter<W> {
+    pub fn new(wr: W) -> Self {
+        Self { wr, created: false }
     }
 
     pub async fn init(&mut self) -> Result<()> {
@@ -537,8 +588,7 @@ impl<W: AsyncWrite + Unpin> MetacacheWriter<W> {
     }
 
     async fn write_version(&mut self, version: u8) -> Result<()> {
-        rmp::encode::write_pfix(&mut self.buf, version)?;
-        self.flush().await?;
+        rmp::write_pfix(&mut self.wr, version).await?;
         Ok(())
     }
 
@@ -546,13 +596,7 @@ impl<W: AsyncWrite + Unpin> MetacacheWriter<W> {
     pub async fn write_obj(&mut self, obj: &MetaCacheEntry) -> Result<()> {
         self.init().await?;
 
-        rmp::encode::write_pfix(&mut self.buf, obj.msg_type.to_u8())?;
-        rmp::encode::write_str(&mut self.buf, &obj.name)?;
-        rmp::encode::write_bin(&mut self.buf, &obj.metadata)?;
-        rmp::encode::write_u32(&mut self.buf, obj.err_no)?;
-        rmp::encode::write_str(&mut self.buf, &obj.err_msg)?;
-
-        self.flush().await?;
+        obj.write_to(&mut self.wr).await?;
 
         Ok(())
     }
@@ -566,15 +610,35 @@ impl<W: AsyncWrite + Unpin> MetacacheWriter<W> {
         self.write_obj(&obj).await?;
         Ok(())
     }
+
+    pub async fn write_err(&mut self, err_no: u32, err_msg: String) -> Result<()> {
+        let obj = MetaCacheEntry {
+            msg_type: MetaCacheEntryType::Error,
+            err_no,
+            err_msg,
+            ..Default::default()
+        };
+
+        self.write_obj(&obj).await?;
+        Ok(())
+    }
 }
 
 pub struct MetacacheReader<R> {
     rd: R,
     init: bool,
     err: Option<Error>,
-    buf: Vec<u8>,
-    offset: usize,
     current: Option<MetaCacheEntry>,
+}
+
+#[async_trait::async_trait]
+impl<R: AsyncRead + Unpin + Send + Sync> RmpReader for MetacacheReader<R> {
+    type Error = std::io::Error;
+
+    async fn read_exact_buf(&mut self, buf: &mut [u8]) -> std::result::Result<(), Self::Error> {
+        self.rd.read_exact(buf).await?;
+        Ok(())
+    }
 }
 
 impl<R: AsyncRead + Unpin + Send + Sync> MetacacheReader<R> {
@@ -583,41 +647,12 @@ impl<R: AsyncRead + Unpin + Send + Sync> MetacacheReader<R> {
             rd,
             init: false,
             err: None,
-            buf: Vec::new(),
-            offset: 0,
             current: None,
         }
     }
 
-    // pub async fn read_more(&mut self, read_size: usize) -> Result<&[u8]> {
-    //     let ext_size = read_size + self.offset;
-
-    //     let extra = ext_size - self.offset;
-    //     if self.buf.capacity() >= ext_size {
-    //         // Extend the buffer if we have enough space.
-    //         self.buf.resize(ext_size, 0);
-    //     } else {
-    //         self.buf.extend(vec![0u8; extra]);
-    //     }
-
-    //     let pref = self.offset;
-
-    //     self.rd.read_exact(&mut self.buf[pref..ext_size]).await?;
-
-    //     self.offset += read_size;
-
-    //     let data = &self.buf[pref..ext_size];
-
-    //     Ok(data)
-    // }
-
-    fn reset(&mut self) {
-        self.buf.clear();
-        self.offset = 0;
-    }
-
     async fn read_version(&mut self) -> Result<u8> {
-        super::rmp::decode::read_u8(&mut self.rd).await.map_err(|e| e.into())
+        super::rmp::read_pfix(&mut self.rd).await.map_err(|e| e.into())
     }
 
     async fn check_init(&mut self) -> Result<()> {
@@ -635,76 +670,6 @@ impl<R: AsyncRead + Unpin + Send + Sync> MetacacheReader<R> {
         Ok(())
     }
 
-    // async fn read_str_len(&mut self) -> Result<u32> {
-    //     let mark = match rmp::decode::read_marker(&mut self.read_more(1).await?) {
-    //         Ok(res) => res,
-    //         Err(err) => {
-    //             let err: Error = err.into();
-    //             self.err = Some(err.clone());
-    //             return Err(err);
-    //         }
-    //     };
-
-    //     match mark {
-    //         Marker::FixStr(size) => Ok(u32::from(size)),
-    //         Marker::Str8 => Ok(u32::from(self.read_u8().await?)),
-    //         Marker::Str16 => Ok(u32::from(self.read_u16().await?)),
-    //         Marker::Str32 => Ok(self.read_u32().await?),
-    //         _marker => Err(Error::other("str marker err")),
-    //     }
-    // }
-
-    // async fn read_str_data(&mut self, len: u32) -> Result<String> {
-    //     let buf = self.read_more(len as usize).await?;
-    //     let name_buf = buf.to_vec();
-    //     let name = match from_utf8(&name_buf) {
-    //         Ok(decoded) => decoded.to_owned(),
-    //         Err(err) => {
-    //             return Err(Error::other(err.to_string()));
-    //         }
-    //     };
-
-    //     Ok(name)
-    // }
-
-    // async fn read_bin_len(&mut self) -> Result<u32> {
-    //     let mark = match rmp::decode::read_marker(&mut self.read_more(1).await?) {
-    //         Ok(res) => res,
-    //         Err(err) => {
-    //             let err: Error = err.into();
-    //             self.err = Some(err.clone());
-    //             return Err(err);
-    //         }
-    //     };
-
-    //     match mark {
-    //         Marker::Bin8 => Ok(u32::from(self.read_u8().await?)),
-    //         Marker::Bin16 => Ok(u32::from(self.read_u16().await?)),
-    //         Marker::Bin32 => Ok(self.read_u32().await?),
-    //         _ => Err(Error::other("bin marker err")),
-    //     }
-    // }
-
-    // async fn read_bin_data(&mut self, len: u32) -> Result<Vec<u8>> {
-    //     let buf = self.read_more(len as usize).await?;
-    //     Ok(buf.to_vec())
-    // }
-
-    // async fn read_u8(&mut self) -> Result<u8> {
-    //     let buf = self.read_more(1).await?;
-    //     Ok(u8::from_be_bytes(buf.try_into().expect("Slice with incorrect length")))
-    // }
-
-    // async fn read_u16(&mut self) -> Result<u16> {
-    //     let buf = self.read_more(2).await?;
-    //     Ok(u16::from_be_bytes(buf.try_into().expect("Slice with incorrect length")))
-    // }
-
-    // async fn read_u32(&mut self) -> Result<u32> {
-    //     let buf = self.read_more(4).await?;
-    //     Ok(u32::from_be_bytes(buf.try_into().expect("Slice with incorrect length")))
-    // }
-
     pub async fn skip(&mut self, size: usize) -> Result<()> {
         self.check_init().await?;
 
@@ -720,23 +685,14 @@ impl<R: AsyncRead + Unpin + Send + Sync> MetacacheReader<R> {
         }
 
         while n > 0 {
-            match rmp::decode::read_bool(&mut self.read_more(1).await?) {
-                Ok(res) => {
-                    if !res {
-                        return Ok(());
-                    }
-                }
-                Err(err) => {
-                    let err: Error = err.into();
-                    self.err = Some(err.clone());
-                    return Err(err);
-                }
-            };
+            let entry = MetaCacheEntry::read_from(&mut self.rd).await?;
+            if entry.msg_type == MetaCacheEntryType::Close {
+                break;
+            }
 
-            let l = self.read_str_len().await?;
-            let _ = self.read_more(l as usize).await?;
-            let l = self.read_bin_len().await?;
-            let _ = self.read_more(l as usize).await?;
+            if entry.msg_type == MetaCacheEntryType::Error {
+                return Err(Error::other(entry.err_msg));
+            }
 
             n -= 1;
         }
@@ -751,75 +707,57 @@ impl<R: AsyncRead + Unpin + Send + Sync> MetacacheReader<R> {
             return Err(err.clone());
         }
 
-        match rmp::decode::read_bool(&mut self.read_more(1).await?) {
-            Ok(res) => {
-                if !res {
-                    return Ok(None);
-                }
-            }
-            Err(err) => {
-                let err: Error = err.into();
-                self.err = Some(err.clone());
-                return Err(err);
-            }
-        };
+        let entry = MetaCacheEntry::read_from(&mut self.rd).await?;
+        self.current = Some(entry.clone());
 
-        let l = self.read_str_len().await?;
+        if entry.msg_type == MetaCacheEntryType::Close {
+            return Ok(None);
+        }
 
-        let buf = self.read_more(l as usize).await?;
-        let name_buf = buf.to_vec();
-        let name = match from_utf8(&name_buf) {
-            Ok(decoded) => decoded.to_owned(),
-            Err(err) => {
-                self.err = Some(Error::other(err.to_string()));
-                return Err(Error::other(err.to_string()));
-            }
-        };
+        if entry.msg_type == MetaCacheEntryType::Error {
+            return Err(Error::other(entry.err_msg));
+        }
 
-        let l = self.read_bin_len().await?;
-
-        let buf = self.read_more(l as usize).await?;
-
-        let metadata = buf.to_vec();
-
-        self.reset();
-
-        let entry = Some(MetaCacheEntry {
-            name,
-            metadata,
-            cached: None,
-            reusable: false,
-            msg_type: MetaCacheEntryType::Object,
-            err_no: 0,
-            err_msg: String::new(),
-        });
-        self.current = entry.clone();
-
-        Ok(entry)
+        Ok(Some(entry))
     }
 
     pub async fn read_all(&mut self) -> Result<Vec<MetaCacheEntry>> {
         let mut ret = Vec::new();
 
         loop {
-            if let Some(entry) = self.peek().await? {
+            self.check_init().await?;
+
+            if let Some(err) = &self.err {
+                return Err(err.clone());
+            }
+
+            // If we have a current entry, use it and clear it
+            if let Some(entry) = self.current.take() {
+                if entry.msg_type == MetaCacheEntryType::Close {
+                    break;
+                }
+                if entry.msg_type == MetaCacheEntryType::Error {
+                    return Err(Error::other(entry.err_msg));
+                }
                 ret.push(entry);
                 continue;
             }
-            break;
+
+            // Read next entry
+            let entry = MetaCacheEntry::read_from(&mut self.rd).await?;
+
+            if entry.msg_type == MetaCacheEntryType::Close {
+                break;
+            }
+
+            if entry.msg_type == MetaCacheEntryType::Error {
+                return Err(Error::other(entry.err_msg));
+            }
+
+            ret.push(entry);
         }
 
         Ok(ret)
-    }
-}
-
-#[async_trait::async_trait]
-impl<R: AsyncRead + Unpin + Send + Sync> RmpReader for MetacacheReader<R> {
-    type Error = std::io::Error;
-
-    async fn read_exact_buf(&mut self, buf: &mut [u8]) -> std::result::Result<(), Self::Error> {
-        self.rd.read_exact(buf).await?;
-        Ok(())
     }
 }
 
@@ -964,5 +902,507 @@ mod tests {
         let nobjs = r.read_all().await.unwrap();
 
         assert_eq!(objs, nobjs);
+    }
+
+    #[tokio::test]
+    async fn test_metacache_writer_empty_objects() {
+        let mut f = Cursor::new(Vec::new());
+        let mut w = MetacacheWriter::new(&mut f);
+
+        // Test writing empty objects array
+        let objs = Vec::new();
+        w.write(&objs).await.unwrap();
+        w.close().await.unwrap();
+
+        let data = f.into_inner();
+        let nf = Cursor::new(data);
+
+        let mut r = MetacacheReader::new(nf);
+        let nobjs = r.read_all().await.unwrap();
+
+        assert_eq!(objs, nobjs);
+    }
+
+    #[tokio::test]
+    async fn test_metacache_writer_single_object() {
+        let mut f = Cursor::new(Vec::new());
+        let mut w = MetacacheWriter::new(&mut f);
+
+        let obj = MetaCacheEntry {
+            name: "test-object".to_string(),
+            metadata: vec![1, 2, 3, 4, 5],
+            cached: None,
+            reusable: false,
+            msg_type: MetaCacheEntryType::Object,
+            err_no: 0,
+            err_msg: String::new(),
+        };
+
+        w.write_obj(&obj).await.unwrap();
+        w.close().await.unwrap();
+
+        let data = f.into_inner();
+        let nf = Cursor::new(data);
+
+        let mut r = MetacacheReader::new(nf);
+        let read_obj = r.peek().await.unwrap().unwrap();
+
+        assert_eq!(obj, read_obj);
+    }
+
+    #[tokio::test]
+    async fn test_metacache_writer_error_entry() {
+        let mut f = Cursor::new(Vec::new());
+        let mut w = MetacacheWriter::new(&mut f);
+
+        let err_no = 404;
+        let err_msg = "Object not found".to_string();
+
+        w.write_err(err_no, err_msg.clone()).await.unwrap();
+
+        let data = f.into_inner();
+        let nf = Cursor::new(data);
+
+        let mut r = MetacacheReader::new(nf);
+        let result = r.peek().await;
+
+        assert!(result.is_err());
+        let error = result.unwrap_err();
+        assert!(error.to_string().contains(&err_msg));
+    }
+
+    #[tokio::test]
+    async fn test_metacache_writer_directory_entry() {
+        let mut f = Cursor::new(Vec::new());
+        let mut w = MetacacheWriter::new(&mut f);
+
+        let dir_entry = MetaCacheEntry {
+            name: "test-dir/".to_string(),
+            metadata: Vec::new(), // Empty metadata indicates directory
+            cached: None,
+            reusable: false,
+            msg_type: MetaCacheEntryType::Object,
+            err_no: 0,
+            err_msg: String::new(),
+        };
+
+        w.write_obj(&dir_entry).await.unwrap();
+        w.close().await.unwrap();
+
+        let data = f.into_inner();
+        let nf = Cursor::new(data);
+
+        let mut r = MetacacheReader::new(nf);
+        let read_entry = r.peek().await.unwrap().unwrap();
+
+        assert_eq!(dir_entry, read_entry);
+        assert!(read_entry.is_dir());
+    }
+
+    #[tokio::test]
+    async fn test_metacache_writer_mixed_entries() {
+        let mut f = Cursor::new(Vec::new());
+        let mut w = MetacacheWriter::new(&mut f);
+
+        let entries = vec![
+            MetaCacheEntry {
+                name: "dir/".to_string(),
+                metadata: Vec::new(),
+                cached: None,
+                reusable: false,
+                msg_type: MetaCacheEntryType::Object,
+                err_no: 0,
+                err_msg: String::new(),
+            },
+            MetaCacheEntry {
+                name: "file.txt".to_string(),
+                metadata: vec![1, 2, 3],
+                cached: None,
+                reusable: false,
+                msg_type: MetaCacheEntryType::Object,
+                err_no: 0,
+                err_msg: String::new(),
+            },
+        ];
+
+        w.write(&entries).await.unwrap();
+        w.close().await.unwrap();
+
+        let data = f.into_inner();
+        let nf = Cursor::new(data);
+
+        let mut r = MetacacheReader::new(nf);
+        let read_entries = r.read_all().await.unwrap();
+
+        assert_eq!(entries.len(), read_entries.len());
+        for (expected, actual) in entries.iter().zip(read_entries.iter()) {
+            assert_eq!(expected, actual);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_metacache_reader_skip() {
+        let mut f = Cursor::new(Vec::new());
+        let mut w = MetacacheWriter::new(&mut f);
+
+        let mut objs = Vec::new();
+        for i in 0..5 {
+            let info = MetaCacheEntry {
+                name: format!("item{i}"),
+                metadata: vec![i as u8],
+                cached: None,
+                reusable: false,
+                msg_type: MetaCacheEntryType::Object,
+                err_no: 0,
+                err_msg: String::new(),
+            };
+            objs.push(info);
+        }
+
+        w.write(&objs).await.unwrap();
+        w.close().await.unwrap();
+
+        let data = f.into_inner();
+        let nf = Cursor::new(data);
+
+        let mut r = MetacacheReader::new(nf);
+
+        // Skip first 3 entries
+        r.skip(3).await.unwrap();
+
+        let remaining = r.read_all().await.unwrap();
+        assert_eq!(remaining.len(), 2);
+        assert_eq!(remaining[0].name, "item3");
+        assert_eq!(remaining[1].name, "item4");
+    }
+
+    #[tokio::test]
+    async fn test_metacache_reader_peek_multiple() {
+        let mut f = Cursor::new(Vec::new());
+        let mut w = MetacacheWriter::new(&mut f);
+
+        let obj = MetaCacheEntry {
+            name: "test-item".to_string(),
+            metadata: vec![42],
+            cached: None,
+            reusable: false,
+            msg_type: MetaCacheEntryType::Object,
+            err_no: 0,
+            err_msg: String::new(),
+        };
+
+        w.write_obj(&obj).await.unwrap();
+        w.close().await.unwrap();
+
+        let data = f.into_inner();
+        let nf = Cursor::new(data);
+
+        let mut r = MetacacheReader::new(nf);
+
+        // First peek should return the object
+        let peek1 = r.peek().await.unwrap().unwrap();
+        assert_eq!(peek1.name, "test-item");
+
+        // Second peek should return None (close entry)
+        let peek2 = r.peek().await.unwrap();
+        assert!(peek2.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_metacache_entry_type_conversion() {
+        assert_eq!(MetaCacheEntryType::Object.to_u8(), 1);
+        assert_eq!(MetaCacheEntryType::Error.to_u8(), 2);
+        assert_eq!(MetaCacheEntryType::Close.to_u8(), 0);
+
+        assert_eq!(MetaCacheEntryType::from_u8(1), MetaCacheEntryType::Object);
+        assert_eq!(MetaCacheEntryType::from_u8(2), MetaCacheEntryType::Error);
+        assert_eq!(MetaCacheEntryType::from_u8(0), MetaCacheEntryType::Close);
+        assert_eq!(MetaCacheEntryType::from_u8(99), MetaCacheEntryType::Close); // Invalid values default to Close
+    }
+
+    #[tokio::test]
+    async fn test_metacache_entry_is_dir() {
+        let dir_entry = MetaCacheEntry {
+            name: "test-dir/".to_string(),
+            metadata: Vec::new(),
+            ..Default::default()
+        };
+        assert!(dir_entry.is_dir());
+
+        let file_entry = MetaCacheEntry {
+            name: "test-file.txt".to_string(),
+            metadata: vec![1, 2, 3],
+            ..Default::default()
+        };
+        assert!(!file_entry.is_dir());
+
+        let dir_no_slash = MetaCacheEntry {
+            name: "test-dir".to_string(),
+            metadata: Vec::new(),
+            ..Default::default()
+        };
+        assert!(!dir_no_slash.is_dir());
+    }
+
+    #[tokio::test]
+    async fn test_metacache_entry_is_object() {
+        let object_entry = MetaCacheEntry {
+            name: "test-object".to_string(),
+            metadata: vec![1, 2, 3],
+            ..Default::default()
+        };
+        assert!(object_entry.is_object());
+
+        let dir_entry = MetaCacheEntry {
+            name: "test-dir/".to_string(),
+            metadata: Vec::new(),
+            ..Default::default()
+        };
+        assert!(!dir_entry.is_object());
+    }
+
+    #[tokio::test]
+    async fn test_metacache_entry_is_in_dir() {
+        // Test file in root directory
+        let root_file = MetaCacheEntry {
+            name: "file.txt".to_string(),
+            ..Default::default()
+        };
+        assert!(root_file.is_in_dir("", "/"));
+
+        // Test directory in root
+        let dir_entry = MetaCacheEntry {
+            name: "folder/".to_string(),
+            ..Default::default()
+        };
+        assert!(dir_entry.is_in_dir("", "/"));
+
+        // Test file not in specified directory
+        let other_file = MetaCacheEntry {
+            name: "other/file.txt".to_string(),
+            ..Default::default()
+        };
+        assert!(!other_file.is_in_dir("folder", "/"));
+
+        // Test direct file in folder with trailing slash
+        let direct_file = MetaCacheEntry {
+            name: "folder/file.txt".to_string(),
+            ..Default::default()
+        };
+        assert!(direct_file.is_in_dir("folder/", "/"));
+
+        // Test nested file (should not be considered directly in parent folder)
+        let nested_file = MetaCacheEntry {
+            name: "folder/subfolder/file.txt".to_string(),
+            ..Default::default()
+        };
+        assert!(!nested_file.is_in_dir("folder/", "/")); // Not directly in folder
+        assert!(nested_file.is_in_dir("folder/subfolder/", "/")); // Directly in subfolder
+    }
+
+    #[tokio::test]
+    async fn test_metacache_entry_is_object_dir() {
+        let object_dir = MetaCacheEntry {
+            name: "object-dir/".to_string(),
+            metadata: vec![1, 2, 3],
+            ..Default::default()
+        };
+        assert!(object_dir.is_object_dir());
+
+        let regular_dir = MetaCacheEntry {
+            name: "regular-dir/".to_string(),
+            metadata: Vec::new(),
+            ..Default::default()
+        };
+        assert!(!regular_dir.is_object_dir());
+
+        let file = MetaCacheEntry {
+            name: "file.txt".to_string(),
+            metadata: vec![1, 2, 3],
+            ..Default::default()
+        };
+        assert!(!file.is_object_dir());
+    }
+
+    #[tokio::test]
+    async fn test_metacache_writer_init_multiple_calls() {
+        let mut f = Cursor::new(Vec::new());
+        let mut w = MetacacheWriter::new(&mut f);
+
+        // Multiple init calls should not cause issues
+        w.init().await.unwrap();
+        w.init().await.unwrap();
+        w.init().await.unwrap();
+
+        let obj = MetaCacheEntry {
+            name: "test".to_string(),
+            metadata: vec![1],
+            msg_type: MetaCacheEntryType::Object,
+            err_no: 0,
+            err_msg: String::new(),
+            cached: None,
+            reusable: false,
+        };
+
+        // Use write instead of write_obj to match the working pattern
+        w.write(&[obj.clone()]).await.unwrap();
+        w.close().await.unwrap();
+
+        let data = f.into_inner();
+        let nf = Cursor::new(data);
+
+        let mut r = MetacacheReader::new(nf);
+        let all_objs = r.read_all().await.unwrap();
+
+        assert_eq!(all_objs.len(), 1);
+        assert_eq!(all_objs[0].name, "test");
+        assert_eq!(all_objs[0].metadata, vec![1]);
+    }
+
+    #[tokio::test]
+    async fn test_metacache_reader_empty_stream() {
+        let mut f = Cursor::new(Vec::new());
+        let mut w = MetacacheWriter::new(&mut f);
+
+        // Just write version and close
+        w.init().await.unwrap();
+        w.close().await.unwrap();
+
+        let data = f.into_inner();
+        let nf = Cursor::new(data);
+
+        let mut r = MetacacheReader::new(nf);
+        let objs = r.read_all().await.unwrap();
+
+        assert!(objs.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_metacache_reader_skip_beyond_available() {
+        let mut f = Cursor::new(Vec::new());
+        let mut w = MetacacheWriter::new(&mut f);
+
+        let obj = MetaCacheEntry {
+            name: "single-item".to_string(),
+            metadata: vec![42],
+            ..Default::default()
+        };
+
+        w.write_obj(&obj).await.unwrap();
+        w.close().await.unwrap();
+
+        let data = f.into_inner();
+        let nf = Cursor::new(data);
+
+        let mut r = MetacacheReader::new(nf);
+
+        // Skip more than available - should not error
+        r.skip(10).await.unwrap();
+
+        let remaining = r.read_all().await.unwrap();
+        assert!(remaining.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_metacache_writer_empty_name_error() {
+        let mut f = Cursor::new(Vec::new());
+        let mut w = MetacacheWriter::new(&mut f);
+
+        let obj = MetaCacheEntry {
+            name: String::new(), // Empty name should cause error
+            metadata: vec![1, 2, 3],
+            ..Default::default()
+        };
+
+        // write_obj doesn't validate empty names, only write() does
+        let result = w.write(&[obj]).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("no name"));
+    }
+
+    #[tokio::test]
+    async fn test_metacache_entries_first_found() {
+        let entries = MetaCacheEntries(vec![
+            None,
+            None,
+            Some(MetaCacheEntry {
+                name: "found".to_string(),
+                ..Default::default()
+            }),
+            Some(MetaCacheEntry {
+                name: "also-found".to_string(),
+                ..Default::default()
+            }),
+        ]);
+
+        let (first, total) = entries.first_found();
+        assert_eq!(total, 4);
+        assert!(first.is_some());
+        assert_eq!(first.unwrap().name, "found");
+    }
+
+    #[tokio::test]
+    async fn test_metacache_entries_first_found_empty() {
+        let entries = MetaCacheEntries(vec![None, None, None]);
+
+        let (first, total) = entries.first_found();
+        assert_eq!(total, 3);
+        assert!(first.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_metacache_entries_sorted_forward_past() {
+        let entries = vec![
+            Some(MetaCacheEntry {
+                name: "a".to_string(),
+                ..Default::default()
+            }),
+            Some(MetaCacheEntry {
+                name: "b".to_string(),
+                ..Default::default()
+            }),
+            Some(MetaCacheEntry {
+                name: "c".to_string(),
+                ..Default::default()
+            }),
+            Some(MetaCacheEntry {
+                name: "d".to_string(),
+                ..Default::default()
+            }),
+        ];
+
+        let mut sorted = MetaCacheEntriesSorted {
+            o: MetaCacheEntries(entries),
+            ..Default::default()
+        };
+
+        sorted.forward_past(Some("b".to_string()));
+        let remaining = sorted.entries();
+        assert_eq!(remaining.len(), 2);
+        assert_eq!(remaining[0].name, "c");
+        assert_eq!(remaining[1].name, "d");
+    }
+
+    #[tokio::test]
+    async fn test_metacache_entries_sorted_forward_past_no_marker() {
+        let entries = vec![
+            Some(MetaCacheEntry {
+                name: "a".to_string(),
+                ..Default::default()
+            }),
+            Some(MetaCacheEntry {
+                name: "b".to_string(),
+                ..Default::default()
+            }),
+        ];
+
+        let mut sorted = MetaCacheEntriesSorted {
+            o: MetaCacheEntries(entries),
+            ..Default::default()
+        };
+
+        sorted.forward_past(None);
+        let remaining = sorted.entries();
+        assert_eq!(remaining.len(), 2); // Should remain unchanged
     }
 }
