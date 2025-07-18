@@ -250,6 +250,14 @@ where
     }
 }
 
+pub async fn read_bytes_data<'r, R>(rd: &mut R, len: u32, buf: &'r mut [u8]) -> Result<(), DecodeStringError<'r, R::Error>>
+where
+    R: RmpReader,
+{
+    debug_assert_eq!(len as usize, buf.len());
+    rd.read_exact_buf(buf).await.map_err(DecodeStringError::InvalidDataRead)
+}
+
 /// Attempts to read a single byte from the given reader and to decode it as a positive fixnum
 /// value.
 ///

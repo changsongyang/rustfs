@@ -158,7 +158,7 @@ async fn walk_dir() -> Result<(), Box<dyn Error>> {
     });
     let job2 = spawn(async move {
         let mut reader = MetacacheReader::new(rd);
-        while let Ok(Some(entry)) = reader.peek().await {
+        while let Ok(Some(entry)) = reader.next().await {
             println!("{entry:?}");
         }
     });

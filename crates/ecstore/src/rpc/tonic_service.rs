@@ -829,7 +829,7 @@ impl Node for NodeService {
                     let mut reader = MetacacheReader::new(rd);
 
                     loop {
-                        match reader.peek().await {
+                        match reader.next().await {
                             Ok(res) => {
                                 if let Some(info) = res {
                                     match serde_json::to_string(&info) {

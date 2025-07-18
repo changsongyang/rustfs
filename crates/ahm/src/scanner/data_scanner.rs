@@ -614,7 +614,7 @@ impl Scanner {
         let mut object_metadata = HashMap::new();
 
         // Process each object entry
-        while let Ok(Some(mut entry)) = reader.peek().await {
+        while let Ok(Some(mut entry)) = reader.next().await {
             objects_scanned += 1;
             // Check if this is an actual object (not just a directory)
             if entry.is_object() {

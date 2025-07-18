@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use rustfs_utils::error_codes::{ErrorCode, FromErrorCode, ToErrorCode, error_types};
+
 pub type Result<T> = core::result::Result<T, Error>;
 
 #[derive(thiserror::Error, Debug)]
@@ -67,12 +69,117 @@ pub enum Error {
     UuidParse(String),
 }
 
+// Define error codes for this module
+pub mod error_codes {
+    // Basic errors
+    pub const FILE_NOT_FOUND: u16 = 0x0001;
+    pub const FILE_VERSION_NOT_FOUND: u16 = 0x0002;
+    pub const VOLUME_NOT_FOUND: u16 = 0x0003;
+    pub const FILE_CORRUPT: u16 = 0x0004;
+    pub const METHOD_NOT_ALLOWED: u16 = 0x0005;
+    pub const UNEXPECTED: u16 = 0x0006;
+
+    // Module-specific errors
+    pub const DONE_FOR_NOW: u16 = 0x0010;
+
+    // I/O related errors
+    pub const IO_ERROR: u16 = 0x0100;
+
+    // Serialization errors
+    pub const RMP_SERDE_DECODE: u16 = 0x0300;
+    pub const RMP_SERDE_ENCODE: u16 = 0x0301;
+    pub const FROM_UTF8: u16 = 0x0302;
+    pub const RMP_DECODE_VALUE_READ: u16 = 0x0303;
+    pub const RMP_ENCODE_VALUE_WRITE: u16 = 0x0304;
+    pub const RMP_DECODE_NUM_VALUE_READ: u16 = 0x0305;
+    pub const RMP_DECODE_MARKER_READ: u16 = 0x0306;
+    pub const TIME_COMPONENT_RANGE: u16 = 0x0307;
+    pub const UUID_PARSE: u16 = 0x0308;
+}
+
 impl Error {
     pub fn other<E>(error: E) -> Error
     where
         E: Into<Box<dyn std::error::Error + Send + Sync>>,
     {
         std::io::Error::other(error).into()
+    }
+
+    /// Get the error code using the new u32 format
+    pub fn code(&self) -> u32 {
+        self.to_error_code().as_u32()
+    }
+
+    /// Create an error from a u32 code
+    pub fn from_code(code: u32) -> Option<Self> {
+        Self::from_error_code(ErrorCode::from_u32(code))
+    }
+
+    /// Extract error type from code (high 16 bits)
+    pub fn error_type_from_code(code: u32) -> u16 {
+        ErrorCode::from_u32(code).error_type()
+    }
+
+    /// Extract specific error code (low 16 bits)
+    pub fn specific_code_from_code(code: u32) -> u16 {
+        ErrorCode::from_u32(code).specific_code()
+    }
+}
+
+impl ToErrorCode for Error {
+    fn to_error_code(&self) -> ErrorCode {
+        let specific_code = match self {
+            Error::FileNotFound => error_codes::FILE_NOT_FOUND,
+            Error::FileVersionNotFound => error_codes::FILE_VERSION_NOT_FOUND,
+            Error::VolumeNotFound => error_codes::VOLUME_NOT_FOUND,
+            Error::FileCorrupt => error_codes::FILE_CORRUPT,
+            Error::DoneForNow => error_codes::DONE_FOR_NOW,
+            Error::MethodNotAllowed => error_codes::METHOD_NOT_ALLOWED,
+            Error::Unexpected => error_codes::UNEXPECTED,
+            Error::Io(_) => error_codes::IO_ERROR,
+            Error::RmpSerdeDecode(_) => error_codes::RMP_SERDE_DECODE,
+            Error::RmpSerdeEncode(_) => error_codes::RMP_SERDE_ENCODE,
+            Error::FromUtf8(_) => error_codes::FROM_UTF8,
+            Error::RmpDecodeValueRead(_) => error_codes::RMP_DECODE_VALUE_READ,
+            Error::RmpEncodeValueWrite(_) => error_codes::RMP_ENCODE_VALUE_WRITE,
+            Error::RmpDecodeNumValueRead(_) => error_codes::RMP_DECODE_NUM_VALUE_READ,
+            Error::RmpDecodeMarkerRead(_) => error_codes::RMP_DECODE_MARKER_READ,
+            Error::TimeComponentRange(_) => error_codes::TIME_COMPONENT_RANGE,
+            Error::UuidParse(_) => error_codes::UUID_PARSE,
+        };
+
+        ErrorCode::new(error_types::FILEMETA, specific_code)
+    }
+}
+
+impl FromErrorCode<Error> for Error {
+    fn from_error_code(code: ErrorCode) -> Option<Error> {
+        if code.error_type() != error_types::FILEMETA {
+            return None;
+        }
+
+        match code.specific_code() {
+            error_codes::FILE_NOT_FOUND => Some(Error::FileNotFound),
+            error_codes::FILE_VERSION_NOT_FOUND => Some(Error::FileVersionNotFound),
+            error_codes::VOLUME_NOT_FOUND => Some(Error::VolumeNotFound),
+            error_codes::FILE_CORRUPT => Some(Error::FileCorrupt),
+            error_codes::DONE_FOR_NOW => Some(Error::DoneForNow),
+            error_codes::METHOD_NOT_ALLOWED => Some(Error::MethodNotAllowed),
+            error_codes::UNEXPECTED => Some(Error::Unexpected),
+            error_codes::IO_ERROR => Some(Error::Io(std::io::Error::other("I/O error"))),
+            error_codes::RMP_SERDE_DECODE => Some(Error::RmpSerdeDecode("rmp serde decode error".to_string())),
+            error_codes::RMP_SERDE_ENCODE => Some(Error::RmpSerdeEncode("rmp serde encode error".to_string())),
+            error_codes::FROM_UTF8 => Some(Error::FromUtf8("UTF-8 error".to_string())),
+            error_codes::RMP_DECODE_VALUE_READ => Some(Error::RmpDecodeValueRead("rmp decode value read error".to_string())),
+            error_codes::RMP_ENCODE_VALUE_WRITE => Some(Error::RmpEncodeValueWrite("rmp encode value write error".to_string())),
+            error_codes::RMP_DECODE_NUM_VALUE_READ => {
+                Some(Error::RmpDecodeNumValueRead("rmp decode num value read error".to_string()))
+            }
+            error_codes::RMP_DECODE_MARKER_READ => Some(Error::RmpDecodeMarkerRead("rmp decode marker read error".to_string())),
+            error_codes::TIME_COMPONENT_RANGE => Some(Error::TimeComponentRange("time component range error".to_string())),
+            error_codes::UUID_PARSE => Some(Error::UuidParse("uuid parse error".to_string())),
+            _ => None,
+        }
     }
 }
 
@@ -86,13 +193,6 @@ impl PartialEq for Error {
             (Error::FileVersionNotFound, Error::FileVersionNotFound) => true,
             (Error::VolumeNotFound, Error::VolumeNotFound) => true,
             (Error::Io(e1), Error::Io(e2)) => e1.kind() == e2.kind() && e1.to_string() == e2.to_string(),
-            (Error::RmpSerdeDecode(e1), Error::RmpSerdeDecode(e2)) => e1 == e2,
-            (Error::RmpSerdeEncode(e1), Error::RmpSerdeEncode(e2)) => e1 == e2,
-            (Error::RmpDecodeValueRead(e1), Error::RmpDecodeValueRead(e2)) => e1 == e2,
-            (Error::RmpEncodeValueWrite(e1), Error::RmpEncodeValueWrite(e2)) => e1 == e2,
-            (Error::RmpDecodeNumValueRead(e1), Error::RmpDecodeNumValueRead(e2)) => e1 == e2,
-            (Error::TimeComponentRange(e1), Error::TimeComponentRange(e2)) => e1 == e2,
-            (Error::UuidParse(e1), Error::UuidParse(e2)) => e1 == e2,
             (Error::Unexpected, Error::Unexpected) => true,
             (a, b) => a.to_string() == b.to_string(),
         }
@@ -163,6 +263,12 @@ impl From<std::string::FromUtf8Error> for Error {
 impl From<rmp::decode::ValueReadError> for Error {
     fn from(e: rmp::decode::ValueReadError) -> Self {
         Error::RmpDecodeValueRead(e.to_string())
+    }
+}
+
+impl From<rmp::decode::DecodeStringError<'_>> for Error {
+    fn from(e: rmp::decode::DecodeStringError<'_>) -> Self {
+        Error::other(e.to_string())
     }
 }
 

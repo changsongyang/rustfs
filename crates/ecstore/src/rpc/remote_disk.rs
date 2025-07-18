@@ -581,7 +581,7 @@ impl DiskAPI for RemoteDisk {
     }
 
     #[tracing::instrument(skip(self, wr))]
-    async fn walk_dir<W: AsyncWrite + Unpin + Send>(&self, opts: WalkDirOptions, wr: &mut W) -> Result<()> {
+    async fn walk_dir<W: AsyncWrite + Unpin + Send + Sync>(&self, opts: WalkDirOptions, wr: &mut W) -> Result<()> {
         info!("walk_dir {}", self.endpoint.to_string());
 
         let url = format!(

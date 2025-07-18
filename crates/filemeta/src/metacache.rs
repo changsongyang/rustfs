@@ -656,26 +656,39 @@ impl<R: AsyncRead + Unpin + Send + Sync> MetacacheReader<R> {
     }
 
     async fn check_init(&mut self) -> Result<()> {
-        if !self.init {
-            let ver = self.read_version().await?;
-            match ver {
-                METACACHE_STREAM_VERSION_V1 => (),
-                _ => {
-                    self.err = Some(Error::other("invalid version"));
-                }
-            }
-
-            self.init = true;
+        if let Some(err) = &self.err {
+            return Err(err.clone());
         }
+
+        if self.init {
+            return Ok(());
+        }
+
+        let ver = match self.read_version().await {
+            Ok(ver) => ver,
+            Err(e) => {
+                self.err = Some(e.clone());
+                return Err(e);
+            }
+        };
+        match ver {
+            METACACHE_STREAM_VERSION_V1 => (),
+            _ => {
+                self.err = Some(Error::other("invalid version"));
+            }
+        }
+
+        self.init = true;
+
+        if let Some(err) = &self.err {
+            return Err(err.clone());
+        }
+
         Ok(())
     }
 
     pub async fn skip(&mut self, size: usize) -> Result<()> {
         self.check_init().await?;
-
-        if let Some(err) = &self.err {
-            return Err(err.clone());
-        }
 
         let mut n = size;
 
@@ -700,15 +713,10 @@ impl<R: AsyncRead + Unpin + Send + Sync> MetacacheReader<R> {
         Ok(())
     }
 
-    pub async fn peek(&mut self) -> Result<Option<MetaCacheEntry>> {
+    pub async fn next(&mut self) -> Result<Option<MetaCacheEntry>> {
         self.check_init().await?;
 
-        if let Some(err) = &self.err {
-            return Err(err.clone());
-        }
-
         let entry = MetaCacheEntry::read_from(&mut self.rd).await?;
-        self.current = Some(entry.clone());
 
         if entry.msg_type == MetaCacheEntryType::Close {
             return Ok(None);
@@ -721,16 +729,11 @@ impl<R: AsyncRead + Unpin + Send + Sync> MetacacheReader<R> {
         Ok(Some(entry))
     }
 
-    pub async fn read_all(&mut self) -> Result<Vec<MetaCacheEntry>> {
+    async fn read_all(&mut self) -> Result<Vec<MetaCacheEntry>> {
         let mut ret = Vec::new();
+        self.check_init().await?;
 
         loop {
-            self.check_init().await?;
-
-            if let Some(err) = &self.err {
-                return Err(err.clone());
-            }
-
             // If we have a current entry, use it and clear it
             if let Some(entry) = self.current.take() {
                 if entry.msg_type == MetaCacheEntryType::Close {
@@ -945,7 +948,7 @@ mod tests {
         let nf = Cursor::new(data);
 
         let mut r = MetacacheReader::new(nf);
-        let read_obj = r.peek().await.unwrap().unwrap();
+        let read_obj = r.next().await.unwrap().unwrap();
 
         assert_eq!(obj, read_obj);
     }
@@ -964,7 +967,7 @@ mod tests {
         let nf = Cursor::new(data);
 
         let mut r = MetacacheReader::new(nf);
-        let result = r.peek().await;
+        let result = r.next().await;
 
         assert!(result.is_err());
         let error = result.unwrap_err();
@@ -993,7 +996,7 @@ mod tests {
         let nf = Cursor::new(data);
 
         let mut r = MetacacheReader::new(nf);
-        let read_entry = r.peek().await.unwrap().unwrap();
+        let read_entry = r.next().await.unwrap().unwrap();
 
         assert_eq!(dir_entry, read_entry);
         assert!(read_entry.is_dir());
@@ -1100,11 +1103,11 @@ mod tests {
         let mut r = MetacacheReader::new(nf);
 
         // First peek should return the object
-        let peek1 = r.peek().await.unwrap().unwrap();
+        let peek1 = r.next().await.unwrap().unwrap();
         assert_eq!(peek1.name, "test-item");
 
         // Second peek should return None (close entry)
-        let peek2 = r.peek().await.unwrap();
+        let peek2 = r.next().await.unwrap();
         assert!(peek2.is_none());
     }
 

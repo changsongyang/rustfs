@@ -48,6 +48,9 @@ pub mod compress;
 #[cfg(feature = "path")]
 pub mod dirs;
 
+// Error codes system - always available
+pub mod error_codes;
+
 #[cfg(feature = "tls")]
 pub use certs::*;
 
