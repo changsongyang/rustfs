@@ -16,6 +16,7 @@ use rustfs_utils::error_codes::{AutoErrorCode, ErrorCode, FromErrorCode, ToError
 
 pub type Result<T> = core::result::Result<T, Error>;
 
+// TODO: replace by DiskError
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("File not found")]
@@ -40,33 +41,6 @@ pub enum Error {
 
     #[error("I/O error: {0}")]
     Io(std::io::Error),
-
-    #[error("rmp serde decode error: {0}")]
-    RmpSerdeDecode(String),
-
-    #[error("rmp serde encode error: {0}")]
-    RmpSerdeEncode(String),
-
-    #[error("Invalid UTF-8: {0}")]
-    FromUtf8(String),
-
-    #[error("rmp decode value read error: {0}")]
-    RmpDecodeValueRead(String),
-
-    #[error("rmp encode value write error: {0}")]
-    RmpEncodeValueWrite(String),
-
-    #[error("rmp decode num value read error: {0}")]
-    RmpDecodeNumValueRead(String),
-
-    #[error("rmp decode marker read error: {0}")]
-    RmpDecodeMarkerRead(String),
-
-    #[error("time component range error: {0}")]
-    TimeComponentRange(String),
-
-    #[error("uuid parse error: {0}")]
-    UuidParse(String),
 }
 
 // Implement AutoErrorCode trait directly
@@ -85,15 +59,6 @@ impl AutoErrorCode for Error {
             Error::MethodNotAllowed => 6,
             Error::Unexpected => 7,
             Error::Io(_) => 8,
-            Error::RmpSerdeDecode(_) => 9,
-            Error::RmpSerdeEncode(_) => 10,
-            Error::FromUtf8(_) => 11,
-            Error::RmpDecodeValueRead(_) => 12,
-            Error::RmpEncodeValueWrite(_) => 13,
-            Error::RmpDecodeNumValueRead(_) => 14,
-            Error::RmpDecodeMarkerRead(_) => 15,
-            Error::TimeComponentRange(_) => 16,
-            Error::UuidParse(_) => 17,
         }
     }
 
@@ -107,15 +72,6 @@ impl AutoErrorCode for Error {
             6 => Some(Error::MethodNotAllowed),
             7 => Some(Error::Unexpected),
             8 => Some(Error::Io(std::io::Error::other("I/O error"))),
-            9 => Some(Error::RmpSerdeDecode("rmp serde decode error".to_string())),
-            10 => Some(Error::RmpSerdeEncode("rmp serde encode error".to_string())),
-            11 => Some(Error::FromUtf8("UTF-8 error".to_string())),
-            12 => Some(Error::RmpDecodeValueRead("rmp decode value read error".to_string())),
-            13 => Some(Error::RmpEncodeValueWrite("rmp encode value write error".to_string())),
-            14 => Some(Error::RmpDecodeNumValueRead("rmp decode num value read error".to_string())),
-            15 => Some(Error::RmpDecodeMarkerRead("rmp decode marker read error".to_string())),
-            16 => Some(Error::TimeComponentRange("time component range error".to_string())),
-            17 => Some(Error::UuidParse("uuid parse error".to_string())),
             _ => None,
         }
     }
@@ -178,15 +134,6 @@ impl Clone for Error {
             Error::MethodNotAllowed => Error::MethodNotAllowed,
             Error::VolumeNotFound => Error::VolumeNotFound,
             Error::Io(e) => Error::Io(std::io::Error::new(e.kind(), e.to_string())),
-            Error::RmpSerdeDecode(s) => Error::RmpSerdeDecode(s.clone()),
-            Error::RmpSerdeEncode(s) => Error::RmpSerdeEncode(s.clone()),
-            Error::FromUtf8(s) => Error::FromUtf8(s.clone()),
-            Error::RmpDecodeValueRead(s) => Error::RmpDecodeValueRead(s.clone()),
-            Error::RmpEncodeValueWrite(s) => Error::RmpEncodeValueWrite(s.clone()),
-            Error::RmpDecodeNumValueRead(s) => Error::RmpDecodeNumValueRead(s.clone()),
-            Error::RmpDecodeMarkerRead(s) => Error::RmpDecodeMarkerRead(s.clone()),
-            Error::TimeComponentRange(s) => Error::TimeComponentRange(s.clone()),
-            Error::UuidParse(s) => Error::UuidParse(s.clone()),
             Error::Unexpected => Error::Unexpected,
         }
     }
@@ -211,66 +158,35 @@ impl From<Error> for std::io::Error {
     }
 }
 
-impl From<rmp_serde::decode::Error> for Error {
-    fn from(e: rmp_serde::decode::Error) -> Self {
-        Error::RmpSerdeDecode(e.to_string())
-    }
+// Generic error conversion macro for external error types
+macro_rules! impl_from_error {
+    ($error_type:ty) => {
+        impl From<$error_type> for Error {
+            fn from(e: $error_type) -> Self {
+                Error::other(e.to_string())
+            }
+        }
+    };
+    ($error_type:ty, debug) => {
+        impl From<$error_type> for Error {
+            fn from(e: $error_type) -> Self {
+                Error::other(format!("{e:?}"))
+            }
+        }
+    };
 }
 
-impl From<rmp_serde::encode::Error> for Error {
-    fn from(e: rmp_serde::encode::Error) -> Self {
-        Error::RmpSerdeEncode(e.to_string())
-    }
-}
-
-impl From<std::string::FromUtf8Error> for Error {
-    fn from(e: std::string::FromUtf8Error) -> Self {
-        Error::FromUtf8(e.to_string())
-    }
-}
-
-impl From<rmp::decode::ValueReadError> for Error {
-    fn from(e: rmp::decode::ValueReadError) -> Self {
-        Error::RmpDecodeValueRead(e.to_string())
-    }
-}
-
-impl From<rmp::decode::DecodeStringError<'_>> for Error {
-    fn from(e: rmp::decode::DecodeStringError<'_>) -> Self {
-        Error::other(e.to_string())
-    }
-}
-
-impl From<rmp::encode::ValueWriteError> for Error {
-    fn from(e: rmp::encode::ValueWriteError) -> Self {
-        Error::RmpEncodeValueWrite(e.to_string())
-    }
-}
-
-impl From<rmp::decode::NumValueReadError> for Error {
-    fn from(e: rmp::decode::NumValueReadError) -> Self {
-        Error::RmpDecodeNumValueRead(e.to_string())
-    }
-}
-
-impl From<time::error::ComponentRange> for Error {
-    fn from(e: time::error::ComponentRange) -> Self {
-        Error::TimeComponentRange(e.to_string())
-    }
-}
-
-impl From<uuid::Error> for Error {
-    fn from(e: uuid::Error) -> Self {
-        Error::UuidParse(e.to_string())
-    }
-}
-
-impl From<rmp::decode::MarkerReadError> for Error {
-    fn from(e: rmp::decode::MarkerReadError) -> Self {
-        let serr = format!("{e:?}");
-        Error::RmpDecodeMarkerRead(serr)
-    }
-}
+// Apply the macro to all external error types
+impl_from_error!(rmp_serde::decode::Error);
+impl_from_error!(rmp_serde::encode::Error);
+impl_from_error!(std::string::FromUtf8Error);
+impl_from_error!(rmp::decode::ValueReadError);
+impl_from_error!(rmp::decode::DecodeStringError<'_>);
+impl_from_error!(rmp::encode::ValueWriteError);
+impl_from_error!(rmp::decode::NumValueReadError);
+impl_from_error!(time::error::ComponentRange);
+impl_from_error!(uuid::Error);
+impl_from_error!(rmp::decode::MarkerReadError, debug);
 
 pub fn is_io_eof(e: &Error) -> bool {
     match e {
@@ -313,24 +229,6 @@ mod tests {
     }
 
     #[test]
-    fn test_filemeta_error_conversions() {
-        // Test various error conversions
-        let serde_decode_err =
-            rmp_serde::decode::Error::InvalidMarkerRead(std::io::Error::new(ErrorKind::InvalidData, "invalid"));
-        let filemeta_error: Error = serde_decode_err.into();
-        assert!(matches!(filemeta_error, Error::RmpSerdeDecode(_)));
-
-        // Test with string-based error that we can actually create
-        let encode_error_string = "test encode error";
-        let filemeta_error = Error::RmpSerdeEncode(encode_error_string.to_string());
-        assert!(matches!(filemeta_error, Error::RmpSerdeEncode(_)));
-
-        let utf8_err = std::string::String::from_utf8(vec![0xFF]).unwrap_err();
-        let filemeta_error: Error = utf8_err.into();
-        assert!(matches!(filemeta_error, Error::FromUtf8(_)));
-    }
-
-    #[test]
     fn test_filemeta_error_clone() {
         let test_cases = vec![
             Error::FileNotFound,
@@ -341,15 +239,6 @@ mod tests {
             Error::MethodNotAllowed,
             Error::Unexpected,
             Error::Io(IoError::new(ErrorKind::NotFound, "test")),
-            Error::RmpSerdeDecode("test decode error".to_string()),
-            Error::RmpSerdeEncode("test encode error".to_string()),
-            Error::FromUtf8("test utf8 error".to_string()),
-            Error::RmpDecodeValueRead("test value read error".to_string()),
-            Error::RmpEncodeValueWrite("test value write error".to_string()),
-            Error::RmpDecodeNumValueRead("test num read error".to_string()),
-            Error::RmpDecodeMarkerRead("test marker read error".to_string()),
-            Error::TimeComponentRange("test time error".to_string()),
-            Error::UuidParse("test uuid error".to_string()),
         ];
 
         for original_error in test_cases {
@@ -370,13 +259,6 @@ mod tests {
         let io3 = Error::Io(IoError::new(ErrorKind::PermissionDenied, "test"));
         assert_eq!(io1, io2);
         assert_ne!(io1, io3);
-
-        // Test equality for string variants
-        let decode1 = Error::RmpSerdeDecode("error message".to_string());
-        let decode2 = Error::RmpSerdeDecode("error message".to_string());
-        let decode3 = Error::RmpSerdeDecode("different message".to_string());
-        assert_eq!(decode1, decode2);
-        assert_ne!(decode1, decode3);
     }
 
     #[test]
@@ -389,57 +271,11 @@ mod tests {
             (Error::DoneForNow, "Done for now"),
             (Error::MethodNotAllowed, "Method not allowed"),
             (Error::Unexpected, "Unexpected error"),
-            (Error::RmpSerdeDecode("test".to_string()), "rmp serde decode error: test"),
-            (Error::RmpSerdeEncode("test".to_string()), "rmp serde encode error: test"),
-            (Error::FromUtf8("test".to_string()), "Invalid UTF-8: test"),
-            (Error::TimeComponentRange("test".to_string()), "time component range error: test"),
-            (Error::UuidParse("test".to_string()), "uuid parse error: test"),
         ];
 
         for (error, expected_message) in test_cases {
             assert_eq!(error.to_string(), expected_message);
         }
-    }
-
-    #[test]
-    fn test_rmp_conversions() {
-        // Test rmp value read error (this one works since it has the same signature)
-        let value_read_err = rmp::decode::ValueReadError::InvalidMarkerRead(std::io::Error::new(ErrorKind::InvalidData, "test"));
-        let filemeta_error: Error = value_read_err.into();
-        assert!(matches!(filemeta_error, Error::RmpDecodeValueRead(_)));
-
-        // Test rmp num value read error
-        let num_value_err =
-            rmp::decode::NumValueReadError::InvalidMarkerRead(std::io::Error::new(ErrorKind::InvalidData, "test"));
-        let filemeta_error: Error = num_value_err.into();
-        assert!(matches!(filemeta_error, Error::RmpDecodeNumValueRead(_)));
-    }
-
-    #[test]
-    fn test_time_and_uuid_conversions() {
-        // Test time component range error
-        use time::{Date, Month};
-        let time_result = Date::from_calendar_date(2023, Month::January, 32); // Invalid day
-        assert!(time_result.is_err());
-        let time_error = time_result.unwrap_err();
-        let filemeta_error: Error = time_error.into();
-        assert!(matches!(filemeta_error, Error::TimeComponentRange(_)));
-
-        // Test UUID parse error
-        let uuid_result = uuid::Uuid::parse_str("invalid-uuid");
-        assert!(uuid_result.is_err());
-        let uuid_error = uuid_result.unwrap_err();
-        let filemeta_error: Error = uuid_error.into();
-        assert!(matches!(filemeta_error, Error::UuidParse(_)));
-    }
-
-    #[test]
-    fn test_marker_read_error_conversion() {
-        // Test rmp marker read error conversion
-        let marker_err = rmp::decode::MarkerReadError(std::io::Error::new(ErrorKind::InvalidData, "marker test"));
-        let filemeta_error: Error = marker_err.into();
-        assert!(matches!(filemeta_error, Error::RmpDecodeMarkerRead(_)));
-        assert!(filemeta_error.to_string().contains("marker"));
     }
 
     #[test]
@@ -570,51 +406,6 @@ mod tests {
     }
 
     #[test]
-    fn test_filemeta_error_complex_conversion_chain() {
-        // Test conversion from string error types that we can actually create
-
-        // Test with UUID error conversion
-        let uuid_result = uuid::Uuid::parse_str("invalid-uuid-format");
-        assert!(uuid_result.is_err());
-        let uuid_error = uuid_result.unwrap_err();
-        let filemeta_error: Error = uuid_error.into();
-
-        match filemeta_error {
-            Error::UuidParse(message) => {
-                assert!(message.contains("invalid"));
-            }
-            _ => panic!("Expected UuidParse variant"),
-        }
-
-        // Test with time error conversion
-        use time::{Date, Month};
-        let time_result = Date::from_calendar_date(2023, Month::January, 32); // Invalid day
-        assert!(time_result.is_err());
-        let time_error = time_result.unwrap_err();
-        let filemeta_error2: Error = time_error.into();
-
-        match filemeta_error2 {
-            Error::TimeComponentRange(message) => {
-                assert!(message.contains("range"));
-            }
-            _ => panic!("Expected TimeComponentRange variant"),
-        }
-
-        // Test with UTF8 error conversion
-        let utf8_result = std::string::String::from_utf8(vec![0xFF]);
-        assert!(utf8_result.is_err());
-        let utf8_error = utf8_result.unwrap_err();
-        let filemeta_error3: Error = utf8_error.into();
-
-        match filemeta_error3 {
-            Error::FromUtf8(message) => {
-                assert!(message.contains("utf"));
-            }
-            _ => panic!("Expected FromUtf8 variant"),
-        }
-    }
-
-    #[test]
     fn test_filemeta_error_equality_with_io_errors() {
         // Test equality comparison for Io variants
         let io_error1 = IoError::new(ErrorKind::NotFound, "test message");
@@ -667,16 +458,7 @@ mod tests {
             (Error::DoneForNow, 5),
             (Error::MethodNotAllowed, 6),
             (Error::Unexpected, 7),
-            (Error::Io(std::io::Error::new(std::io::ErrorKind::Other, "test")), 8),
-            (Error::RmpSerdeDecode("test".to_string()), 9),
-            (Error::RmpSerdeEncode("test".to_string()), 10),
-            (Error::FromUtf8("test".to_string()), 11),
-            (Error::RmpDecodeValueRead("test".to_string()), 12),
-            (Error::RmpEncodeValueWrite("test".to_string()), 13),
-            (Error::RmpDecodeNumValueRead("test".to_string()), 14),
-            (Error::RmpDecodeMarkerRead("test".to_string()), 15),
-            (Error::TimeComponentRange("test".to_string()), 16),
-            (Error::UuidParse("test".to_string()), 17),
+            (Error::Io(std::io::Error::other("test")), 8),
         ];
 
         for (error, expected_code) in test_cases {
@@ -701,22 +483,13 @@ mod tests {
             Error::DoneForNow,
             Error::MethodNotAllowed,
             Error::Unexpected,
-            Error::Io(std::io::Error::new(std::io::ErrorKind::Other, "test")),
-            Error::RmpSerdeDecode("test".to_string()),
-            Error::RmpSerdeEncode("test".to_string()),
-            Error::FromUtf8("test".to_string()),
-            Error::RmpDecodeValueRead("test".to_string()),
-            Error::RmpEncodeValueWrite("test".to_string()),
-            Error::RmpDecodeNumValueRead("test".to_string()),
-            Error::RmpDecodeMarkerRead("test".to_string()),
-            Error::TimeComponentRange("test".to_string()),
-            Error::UuidParse("test".to_string()),
+            Error::Io(std::io::Error::other("test")),
         ];
 
         let mut codes = std::collections::HashSet::new();
         for error in errors {
             let code = error.to_error_code().specific_code();
-            assert!(codes.insert(code), "Duplicate error code found: {}", code);
+            assert!(codes.insert(code), "Duplicate error code found: {code}");
         }
     }
 }
