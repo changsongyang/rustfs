@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use rustfs_utils::error_codes::{ErrorCode, FromErrorCode, ToErrorCode, error_types};
+use rustfs_utils::error_codes::{AutoErrorCode, ErrorCode, FromErrorCode, ToErrorCode, error_types};
 
 pub type Result<T> = core::result::Result<T, Error>;
 
@@ -69,8 +69,12 @@ pub enum Error {
     UuidParse(String),
 }
 
-impl Error {
-    /// Get the variant index based on enum definition order (1-based)
+// Implement AutoErrorCode trait directly
+impl AutoErrorCode for Error {
+    fn error_type() -> u16 {
+        error_types::FILEMETA
+    }
+
     fn variant_index(&self) -> u16 {
         match self {
             Error::FileNotFound => 1,
@@ -93,6 +97,31 @@ impl Error {
         }
     }
 
+    fn from_variant_index(index: u16) -> Option<Self> {
+        match index {
+            1 => Some(Error::FileNotFound),
+            2 => Some(Error::FileVersionNotFound),
+            3 => Some(Error::VolumeNotFound),
+            4 => Some(Error::FileCorrupt),
+            5 => Some(Error::DoneForNow),
+            6 => Some(Error::MethodNotAllowed),
+            7 => Some(Error::Unexpected),
+            8 => Some(Error::Io(std::io::Error::other("I/O error"))),
+            9 => Some(Error::RmpSerdeDecode("rmp serde decode error".to_string())),
+            10 => Some(Error::RmpSerdeEncode("rmp serde encode error".to_string())),
+            11 => Some(Error::FromUtf8("UTF-8 error".to_string())),
+            12 => Some(Error::RmpDecodeValueRead("rmp decode value read error".to_string())),
+            13 => Some(Error::RmpEncodeValueWrite("rmp encode value write error".to_string())),
+            14 => Some(Error::RmpDecodeNumValueRead("rmp decode num value read error".to_string())),
+            15 => Some(Error::RmpDecodeMarkerRead("rmp decode marker read error".to_string())),
+            16 => Some(Error::TimeComponentRange("time component range error".to_string())),
+            17 => Some(Error::UuidParse("uuid parse error".to_string())),
+            _ => None,
+        }
+    }
+}
+
+impl Error {
     pub fn other<E>(error: E) -> Error
     where
         E: Into<Box<dyn std::error::Error + Send + Sync>>,
@@ -121,44 +150,7 @@ impl Error {
     }
 }
 
-impl ToErrorCode for Error {
-    fn to_error_code(&self) -> ErrorCode {
-        // Use the variant index as the specific code
-        let specific_code = self.variant_index();
-        ErrorCode::new(error_types::FILEMETA, specific_code)
-    }
-}
-
-impl FromErrorCode<Error> for Error {
-    fn from_error_code(code: ErrorCode) -> Option<Error> {
-        if code.error_type() != error_types::FILEMETA {
-            return None;
-        }
-
-        // This is a simplified approach - in practice, you might want to maintain
-        // a mapping or use a different strategy for variants with data
-        match code.specific_code() {
-            1 => Some(Error::FileNotFound),
-            2 => Some(Error::FileVersionNotFound),
-            3 => Some(Error::VolumeNotFound),
-            4 => Some(Error::FileCorrupt),
-            5 => Some(Error::DoneForNow),
-            6 => Some(Error::MethodNotAllowed),
-            7 => Some(Error::Unexpected),
-            8 => Some(Error::Io(std::io::Error::other("I/O error"))),
-            9 => Some(Error::RmpSerdeDecode("rmp serde decode error".to_string())),
-            10 => Some(Error::RmpSerdeEncode("rmp serde encode error".to_string())),
-            11 => Some(Error::FromUtf8("UTF-8 error".to_string())),
-            12 => Some(Error::RmpDecodeValueRead("rmp decode value read error".to_string())),
-            13 => Some(Error::RmpEncodeValueWrite("rmp encode value write error".to_string())),
-            14 => Some(Error::RmpDecodeNumValueRead("rmp decode num value read error".to_string())),
-            15 => Some(Error::RmpDecodeMarkerRead("rmp decode marker read error".to_string())),
-            16 => Some(Error::TimeComponentRange("time component range error".to_string())),
-            17 => Some(Error::UuidParse("uuid parse error".to_string())),
-            _ => None,
-        }
-    }
-}
+// Note: ToErrorCode and FromErrorCode are automatically implemented via the AutoErrorCode trait
 
 impl PartialEq for Error {
     fn eq(&self, other: &Self) -> bool {

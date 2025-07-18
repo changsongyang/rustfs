@@ -1,17 +1,3 @@
-// Copyright 2024 RustFS Team
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 //! # RustFS Error Code System
 //!
 //! This module defines the error code system for the RustFS project.
@@ -24,6 +10,63 @@
 //! - **Centralized Type Definition**: Error types are defined here to ensure uniqueness
 //! - **Decentralized Implementation**: Each module implements its own specific error codes
 //! - **Extensible Interface**: New error types can be easily added without breaking existing code
+//!
+//! ## Usage Example for Other Modules
+//!
+//! Here's how other modules can use the AutoErrorCode trait:
+//!
+//! ```rust
+//! use rustfs_utils::error_codes::{AutoErrorCode, ErrorCode, ToErrorCode, FromErrorCode, error_types};
+//!
+//! #[derive(thiserror::Error, Debug, PartialEq)]
+//! pub enum StorageError {
+//!     #[error("Bucket not found: {0}")]
+//!     BucketNotFound(String),
+//!     #[error("Object not found: {bucket}/{key}")]
+//!     ObjectNotFound { bucket: String, key: String },
+//!     #[error("Storage full")]
+//!     StorageFull,
+//!     #[error("Invalid request")]
+//!     InvalidRequest,
+//! }
+//!
+//! impl AutoErrorCode for StorageError {
+//!     fn error_type() -> u16 {
+//!         error_types::STORAGE
+//!     }
+//!
+//!     fn variant_index(&self) -> u16 {
+//!         match self {
+//!             StorageError::BucketNotFound(_) => 1,
+//!             StorageError::ObjectNotFound { .. } => 2,
+//!             StorageError::StorageFull => 3,
+//!             StorageError::InvalidRequest => 4,
+//!         }
+//!     }
+//!
+//!     fn from_variant_index(index: u16) -> Option<Self> {
+//!         match index {
+//!             1 => Some(StorageError::BucketNotFound("unknown".to_string())),
+//!             2 => Some(StorageError::ObjectNotFound {
+//!                 bucket: "unknown".to_string(),
+//!                 key: "unknown".to_string(),
+//!             }),
+//!             3 => Some(StorageError::StorageFull),
+//!             4 => Some(StorageError::InvalidRequest),
+//!             _ => None,
+//!         }
+//!     }
+//! }
+//!
+//! // Now you can use the error codes:
+//! let error = StorageError::BucketNotFound("my-bucket".to_string());
+//! let code = error.to_error_code();
+//! assert_eq!(code.as_u32(), 0x0002_0001); // STORAGE type (0x0002) + variant index (0x0001)
+//!
+//! // And convert back:
+//! let reconstructed = StorageError::from_error_code(code);
+//! assert!(reconstructed.is_some());
+//! ```
 
 use std::fmt;
 
@@ -201,6 +244,144 @@ pub trait ErrorCodeMapping {
 
     /// Get the description for a specific error code
     fn error_description(code: u16) -> Option<&'static str>;
+}
+
+/// Trait for automatic error code generation based on enum variant order
+///
+/// This trait provides automatic error code generation and parsing for enums,
+/// eliminating the need for manual error code definitions.
+pub trait AutoErrorCode: Sized {
+    /// Get the error type for this enum
+    fn error_type() -> u16;
+
+    /// Get the variant index based on enum definition order (1-based)
+    fn variant_index(&self) -> u16;
+
+    /// Create an error from a variant index
+    fn from_variant_index(index: u16) -> Option<Self>;
+}
+
+/// Blanket implementation of ToErrorCode for types that implement AutoErrorCode
+impl<T: AutoErrorCode> ToErrorCode for T {
+    fn to_error_code(&self) -> ErrorCode {
+        let specific_code = self.variant_index();
+        ErrorCode::new(T::error_type(), specific_code)
+    }
+}
+
+/// Blanket implementation of FromErrorCode for types that implement AutoErrorCode
+impl<T: AutoErrorCode> FromErrorCode<T> for T {
+    fn from_error_code(code: ErrorCode) -> Option<T> {
+        if code.error_type() != T::error_type() {
+            return None;
+        }
+        T::from_variant_index(code.specific_code())
+    }
+}
+
+/// Helper macro to implement AutoErrorCode for an enum
+///
+/// This macro generates the required methods for automatic error code handling.
+/// It supports both simple variants and variants with data.
+///
+/// # Example
+///
+/// ```rust
+/// use rustfs_utils::error_codes::{impl_auto_error_code, error_types};
+///
+/// #[derive(Debug)]
+/// enum MyError {
+///     NotFound,
+///     InvalidInput,
+///     Timeout,
+///     Io(std::io::Error),
+/// }
+///
+/// impl_auto_error_code! {
+///     error_type: error_types::SYSTEM,
+///     enum_name: MyError,
+///     variants: {
+///         NotFound => 1,
+///         InvalidInput => 2,
+///         Timeout => 3,
+///         Io => 4,
+///     },
+///     variant_constructors: {
+///         Io => MyError::Io(std::io::Error::other("I/O error")),
+///     }
+/// }
+/// ```
+#[macro_export]
+macro_rules! impl_auto_error_code {
+    (
+        error_type: $error_type:expr,
+        enum_name: $enum_name:ident,
+        variants: {
+            $($variant:ident => $index:expr),* $(,)?
+        }
+    ) => {
+        $crate::impl_auto_error_code! {
+            error_type: $error_type,
+            enum_name: $enum_name,
+            variants: {
+                $($variant => $index),*
+            },
+            variant_constructors: {}
+        }
+    };
+
+    (
+        error_type: $error_type:expr,
+        enum_name: $enum_name:ident,
+        variants: {
+            $($variant:ident => $index:expr),* $(,)?
+        },
+        variant_constructors: {
+            $($constructor_variant:ident => $constructor_expr:expr),* $(,)?
+        }
+    ) => {
+        impl $crate::error_codes::AutoErrorCode for $enum_name {
+            fn error_type() -> u16 {
+                $error_type
+            }
+
+            fn variant_index(&self) -> u16 {
+                match self {
+                    $(
+                        $enum_name::$variant $(..)? => $index,
+                    )*
+                }
+            }
+
+            fn from_variant_index(index: u16) -> Option<Self> {
+                match index {
+                    $(
+                        $index => {
+                            $crate::impl_auto_error_code!(@create_variant $enum_name::$variant, $variant; $($constructor_variant => $constructor_expr),*)
+                        }
+                    )*
+                    _ => None,
+                }
+            }
+        }
+    };
+
+    // Helper to create variant instances
+    (@create_variant $full_variant:path, $variant:ident; $($constructor_variant:ident => $constructor_expr:expr),*) => {
+        $crate::impl_auto_error_code!(@find_constructor $full_variant, $variant; $($constructor_variant => $constructor_expr),*)
+    };
+
+    (@find_constructor $full_variant:path, $variant:ident; $first_constructor:ident => $first_expr:expr $(, $rest_constructor:ident => $rest_expr:expr)*) => {
+        if stringify!($variant) == stringify!($first_constructor) {
+            Some($first_expr)
+        } else {
+            $crate::impl_auto_error_code!(@find_constructor $full_variant, $variant; $($rest_constructor => $rest_expr),*)
+        }
+    };
+
+    (@find_constructor $full_variant:path, $variant:ident;) => {
+        Some($full_variant)
+    };
 }
 
 /// Helper macro to define error codes for a module
@@ -432,5 +613,106 @@ mod tests {
         assert_ne!(filemeta_code.as_u32(), storage_code.as_u32());
         assert_eq!(filemeta_code.as_u32(), 0x0001_0001);
         assert_eq!(storage_code.as_u32(), 0x0002_0001);
+    }
+
+    #[test]
+    fn test_auto_error_code_trait() {
+        // Create a simple test enum to verify the AutoErrorCode trait
+        #[derive(Debug, PartialEq)]
+        enum TestError {
+            First,
+            Second,
+            Third,
+        }
+
+        impl AutoErrorCode for TestError {
+            fn error_type() -> u16 {
+                error_types::SYSTEM
+            }
+
+            fn variant_index(&self) -> u16 {
+                match self {
+                    TestError::First => 1,
+                    TestError::Second => 2,
+                    TestError::Third => 3,
+                }
+            }
+
+            fn from_variant_index(index: u16) -> Option<Self> {
+                match index {
+                    1 => Some(TestError::First),
+                    2 => Some(TestError::Second),
+                    3 => Some(TestError::Third),
+                    _ => None,
+                }
+            }
+        }
+
+        // Test ToErrorCode implementation
+        let error = TestError::Second;
+        let code = error.to_error_code();
+        assert_eq!(code.error_type(), error_types::SYSTEM);
+        assert_eq!(code.specific_code(), 2);
+
+        // Test FromErrorCode implementation
+        let reconstructed = TestError::from_error_code(code);
+        assert_eq!(reconstructed, Some(TestError::Second));
+
+        // Test invalid error type
+        let invalid_code = ErrorCode::new(error_types::FILEMETA, 2);
+        let result = TestError::from_error_code(invalid_code);
+        assert_eq!(result, None);
+
+        // Test invalid specific code
+        let invalid_specific = ErrorCode::new(error_types::SYSTEM, 99);
+        let result = TestError::from_error_code(invalid_specific);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_auto_error_code_blanket_implementations() {
+        // Test that the blanket implementations work correctly
+        #[derive(Debug, PartialEq)]
+        enum AnotherTestError {
+            NotFound,
+            InvalidInput,
+        }
+
+        impl AutoErrorCode for AnotherTestError {
+            fn error_type() -> u16 {
+                error_types::STORAGE
+            }
+
+            fn variant_index(&self) -> u16 {
+                match self {
+                    AnotherTestError::NotFound => 1,
+                    AnotherTestError::InvalidInput => 2,
+                }
+            }
+
+            fn from_variant_index(index: u16) -> Option<Self> {
+                match index {
+                    1 => Some(AnotherTestError::NotFound),
+                    2 => Some(AnotherTestError::InvalidInput),
+                    _ => None,
+                }
+            }
+        }
+
+        let error = AnotherTestError::InvalidInput;
+
+        // Test that ToErrorCode works via blanket implementation
+        let code = error.to_error_code();
+        assert_eq!(code.error_type(), error_types::STORAGE);
+        assert_eq!(code.specific_code(), 2);
+        assert_eq!(code.as_u32(), 0x0002_0002);
+
+        // Test that FromErrorCode works via blanket implementation
+        let reconstructed = AnotherTestError::from_error_code(code);
+        assert_eq!(reconstructed, Some(AnotherTestError::InvalidInput));
+
+        // Test convenience methods
+        assert_eq!(error.error_code_u32(), 0x0002_0002);
+        assert_eq!(AnotherTestError::from_error_code_u32(0x0002_0001), Some(AnotherTestError::NotFound));
     }
 }
