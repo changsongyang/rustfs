@@ -14,6 +14,7 @@
 
 use crate::StorageAPI;
 use crate::cache_value::metacache_set::{ListPathRawOptions, list_path_raw};
+use crate::cache_value::{MetaCacheEntries, MetaCacheEntry, MetadataResolutionParams};
 use crate::config::com::{read_config_with_metadata, save_config_with_opts};
 use crate::disk::error::DiskError;
 use crate::error::{Error, Result};
@@ -25,7 +26,7 @@ use crate::store::ECStore;
 use crate::store_api::{CompletePart, GetObjectReader, ObjectIO, ObjectOptions, PutObjReader};
 use http::HeaderMap;
 use rustfs_common::defer;
-use rustfs_filemeta::{FileInfo, MetaCacheEntries, MetaCacheEntry, MetadataResolutionParams};
+use rustfs_filemeta::FileInfo;
 use rustfs_rio::{HashReader, WarpReader};
 use rustfs_utils::path::encode_dir_object;
 use serde::{Deserialize, Serialize};

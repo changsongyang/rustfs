@@ -478,6 +478,13 @@ impl Hash for DiskError {
     }
 }
 
+pub fn is_io_eof(e: &Error) -> bool {
+    match e {
+        Error::Io(e) => e.kind() == std::io::ErrorKind::UnexpectedEof,
+        _ => false,
+    }
+}
+
 // NOTE: Remove commented out code later if not needed
 // Some error-related helper functions and complex error handling logic
 // is currently commented out to avoid complexity. These can be re-enabled

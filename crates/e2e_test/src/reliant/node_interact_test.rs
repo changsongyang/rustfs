@@ -15,8 +15,8 @@
 
 use futures::future::join_all;
 use rmp_serde::{Deserializer, Serializer};
+use rustfs_ecstore::cache_value::{MetaCacheEntry, MetacacheReader, MetacacheWriter};
 use rustfs_ecstore::disk::{VolumeInfo, WalkDirOptions};
-use rustfs_filemeta::{MetaCacheEntry, MetacacheReader, MetacacheWriter};
 use rustfs_protos::proto_gen::node_service::WalkDirRequest;
 use rustfs_protos::{
     models::{PingBody, PingBodyBuilder},

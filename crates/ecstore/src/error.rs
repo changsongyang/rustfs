@@ -311,13 +311,11 @@ impl From<rustfs_filemeta::Error> for StorageError {
         match e {
             rustfs_filemeta::Error::DoneForNow => StorageError::DoneForNow,
             rustfs_filemeta::Error::MethodNotAllowed => StorageError::MethodNotAllowed,
-            rustfs_filemeta::Error::VolumeNotFound => StorageError::VolumeNotFound,
             rustfs_filemeta::Error::FileNotFound => StorageError::FileNotFound,
             rustfs_filemeta::Error::FileVersionNotFound => StorageError::FileVersionNotFound,
             rustfs_filemeta::Error::FileCorrupt => StorageError::FileCorrupt,
             rustfs_filemeta::Error::Unexpected => StorageError::Unexpected,
             rustfs_filemeta::Error::Io(io_error) => io_error.into(),
-            _ => StorageError::Io(std::io::Error::other(e)),
         }
     }
 }
@@ -331,7 +329,6 @@ impl From<StorageError> for rustfs_filemeta::Error {
             StorageError::FileCorrupt => rustfs_filemeta::Error::FileCorrupt,
             StorageError::DoneForNow => rustfs_filemeta::Error::DoneForNow,
             StorageError::MethodNotAllowed => rustfs_filemeta::Error::MethodNotAllowed,
-            StorageError::VolumeNotFound => rustfs_filemeta::Error::VolumeNotFound,
             StorageError::Io(io_error) => io_error.into(),
             _ => rustfs_filemeta::Error::other(val),
         }
@@ -1260,7 +1257,6 @@ mod tests {
             (FilemetaError::FileVersionNotFound, StorageError::FileVersionNotFound),
             (FilemetaError::FileCorrupt, StorageError::FileCorrupt),
             (FilemetaError::MethodNotAllowed, StorageError::MethodNotAllowed),
-            (FilemetaError::VolumeNotFound, StorageError::VolumeNotFound),
             (FilemetaError::DoneForNow, StorageError::DoneForNow),
             (FilemetaError::Unexpected, StorageError::Unexpected),
         ];

@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::error::{Error, Result};
-use crate::rmp::{self, RmpReader, RmpWriter};
-use crate::{FileInfo, FileInfoVersions, FileMeta, FileMetaShallowVersion, VersionType, merge_file_meta_versions};
+use crate::disk::error::{Error, Result};
+use rustfs_filemeta::rmp::{self, RmpReader, RmpWriter};
+use rustfs_filemeta::{FileInfo, FileInfoVersions, FileMeta, FileMetaShallowVersion, VersionType, merge_file_meta_versions};
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::{
@@ -267,6 +267,7 @@ impl MetaCacheEntry {
         let mut fm = FileMeta::new();
         fm.unmarshal_msg(&self.metadata)?;
         fm.into_file_info_versions(bucket, self.name.as_str(), false)
+            .map_err(|e| e.into())
     }
 
     pub fn matches(&self, other: Option<&MetaCacheEntry>, strict: bool) -> (Option<MetaCacheEntry>, bool) {
@@ -652,7 +653,7 @@ impl<R: AsyncRead + Unpin + Send + Sync> MetacacheReader<R> {
     }
 
     async fn read_version(&mut self) -> Result<u8> {
-        super::rmp::read_pfix(&mut self.rd).await.map_err(|e| e.into())
+        rmp::read_pfix(&mut self.rd).await.map_err(|e| e.into())
     }
 
     async fn check_init(&mut self) -> Result<()> {
@@ -729,7 +730,7 @@ impl<R: AsyncRead + Unpin + Send + Sync> MetacacheReader<R> {
         Ok(Some(entry))
     }
 
-    async fn read_all(&mut self) -> Result<Vec<MetaCacheEntry>> {
+    pub async fn read_all(&mut self) -> Result<Vec<MetaCacheEntry>> {
         let mut ret = Vec::new();
         self.check_init().await?;
 

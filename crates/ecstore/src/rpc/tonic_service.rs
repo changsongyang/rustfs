@@ -20,7 +20,7 @@ use crate::{
     bucket::{metadata::load_bucket_metadata, metadata_sys},
     disk::{
         DeleteOptions, DiskAPI, DiskInfoOptions, DiskStore, FileInfoVersions, ReadMultipleReq, ReadOptions, UpdateMetadataOpts,
-        error::DiskError,
+        error::{DiskError, is_io_eof},
     },
     heal::{
         data_usage_cache::DataUsageCache,
@@ -38,9 +38,10 @@ use rustfs_lock::{GLOBAL_LOCAL_SERVER, Locker, lock_args::LockArgs};
 
 use rustfs_common::globals::GLOBAL_Local_Node_Name;
 
+use crate::cache_value::MetacacheReader;
 use bytes::Bytes;
 use rmp_serde::{Deserializer, Serializer};
-use rustfs_filemeta::{FileInfo, MetacacheReader};
+use rustfs_filemeta::FileInfo;
 use rustfs_madmin::health::{
     get_cpus, get_mem_info, get_os_info, get_partitions, get_proc_info, get_sys_config, get_sys_errors, get_sys_services,
 };
@@ -855,7 +856,7 @@ impl Node for NodeService {
                                 }
                             }
                             Err(err) => {
-                                if err == rustfs_filemeta::Error::Unexpected {
+                                if err == DiskError::Unexpected {
                                     let _ = tx
                                         .send(Ok(WalkDirResponse {
                                             success: false,
@@ -867,7 +868,7 @@ impl Node for NodeService {
                                     break;
                                 }
 
-                                if rustfs_filemeta::is_io_eof(&err) {
+                                if is_io_eof(&err) {
                                     let _ = tx
                                         .send(Ok(WalkDirResponse {
                                             success: false,

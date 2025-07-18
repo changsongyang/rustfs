@@ -23,7 +23,7 @@ use ecstore::{
     set_disk::SetDisks,
 };
 use rustfs_ecstore as ecstore;
-use rustfs_filemeta::MetacacheReader;
+use rustfs_ecstore::cache_value::MetacacheReader;
 use tokio::sync::{Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};

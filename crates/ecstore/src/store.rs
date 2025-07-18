@@ -16,6 +16,7 @@
 use crate::bucket::lifecycle::bucket_lifecycle_ops::init_background_expiry;
 use crate::bucket::metadata_sys::{self, set_bucket_metadata};
 use crate::bucket::utils::{check_valid_bucket_name, check_valid_bucket_name_strict, is_meta_bucketname};
+use crate::cache_value::MetaCacheEntry;
 use crate::config::GLOBAL_StorageClass;
 use crate::config::storageclass;
 use crate::disk::endpoint::{Endpoint, EndpointType};
@@ -60,7 +61,6 @@ use lazy_static::lazy_static;
 use rand::Rng as _;
 use rustfs_common::globals::{GLOBAL_Local_Node_Name, GLOBAL_Rustfs_Host, GLOBAL_Rustfs_Port};
 use rustfs_filemeta::FileInfo;
-use rustfs_filemeta::MetaCacheEntry;
 use rustfs_madmin::heal_commands::HealResultItem;
 use rustfs_utils::crypto::base64_decode;
 use rustfs_utils::path::{SLASH_SEPARATOR, decode_dir_object, encode_dir_object, path_join_buf};

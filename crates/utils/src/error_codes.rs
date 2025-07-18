@@ -314,7 +314,7 @@ mod tests {
     #[test]
     fn test_error_code_display() {
         let code = ErrorCode::new(error_types::FILEMETA, 0x0001);
-        let display = format!("{}", code);
+        let display = format!("{code}");
         assert_eq!(display, "FileMeta:0001:0001");
     }
 

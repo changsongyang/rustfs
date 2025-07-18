@@ -38,6 +38,7 @@ use crate::bucket::{
     object_lock::objectlock_sys::{BucketObjectLockSys, enforce_retention_for_deletion},
     utils::is_meta_bucketname,
 };
+use crate::cache_value::{MetaCacheEntries, MetaCacheEntry, MetadataResolutionParams};
 use crate::cmd::bucket_replication::queue_replication_heal;
 use crate::event::name::EventName;
 use crate::{
@@ -88,7 +89,7 @@ use chrono::{DateTime, Utc};
 use lazy_static::lazy_static;
 use rand::Rng;
 use rmp_serde::{Deserializer, Serializer};
-use rustfs_filemeta::{FileInfo, MetaCacheEntries, MetaCacheEntry, MetadataResolutionParams};
+use rustfs_filemeta::FileInfo;
 use rustfs_utils::path::encode_dir_object;
 use rustfs_utils::path::{SLASH_SEPARATOR, path_join, path_to_bucket_object, path_to_bucket_object_with_base_path};
 use s3s::dto::{

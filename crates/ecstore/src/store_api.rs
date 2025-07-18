@@ -14,6 +14,7 @@
 
 use crate::bucket::metadata_sys::get_versioning_config;
 use crate::bucket::versioning::VersioningApi as _;
+use crate::cache_value::MetaCacheEntriesSorted;
 use crate::cmd::bucket_replication::{ReplicationStatusType, VersionPurgeStatusType};
 use crate::error::{Error, Result};
 use crate::heal::heal_ops::HealSequence;
@@ -26,7 +27,7 @@ use crate::{
 use crate::{disk::DiskStore, heal::heal_commands::HealOpts};
 use http::{HeaderMap, HeaderValue};
 use rustfs_filemeta::headers::RESERVED_METADATA_PREFIX_LOWER;
-use rustfs_filemeta::{FileInfo, MetaCacheEntriesSorted, ObjectPartInfo, headers::AMZ_OBJECT_TAGGING};
+use rustfs_filemeta::{FileInfo, ObjectPartInfo, headers::AMZ_OBJECT_TAGGING};
 use rustfs_madmin::heal_commands::HealResultItem;
 use rustfs_rio::{DecompressReader, HashReader, LimitReader, WarpReader};
 use rustfs_utils::CompressionAlgorithm;

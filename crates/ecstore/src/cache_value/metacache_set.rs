@@ -12,10 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::disk::error::DiskError;
+use super::metacache::{MetaCacheEntries, MetaCacheEntry, MetacacheReader};
+use crate::disk::error::{DiskError, is_io_eof};
+
 use crate::disk::{self, DiskAPI, DiskStore, WalkDirOptions};
 use futures::future::join_all;
-use rustfs_filemeta::{MetaCacheEntries, MetaCacheEntry, MetacacheReader, is_io_eof};
 use std::{future::Future, pin::Pin, sync::Arc};
 use tokio::{spawn, sync::broadcast::Receiver as B_Receiver};
 use tracing::{error, warn};
@@ -204,7 +205,7 @@ pub async fn list_path_raw(mut rx: B_Receiver<bool>, opts: ListPathRawOptions) -
                         }
                     }
                     Err(err) => {
-                        if err == rustfs_filemeta::Error::Unexpected {
+                        if err == DiskError::Unexpected {
                             at_eof += 1;
                             // warn!("list_path_raw: peek err eof, disk: {}", i);
                             continue;
@@ -218,12 +219,12 @@ pub async fn list_path_raw(mut rx: B_Receiver<bool>, opts: ListPathRawOptions) -
                             continue;
                         }
 
-                        if err == rustfs_filemeta::Error::FileNotFound {
+                        if err == DiskError::FileNotFound {
                             at_eof += 1;
                             fnf += 1;
                             // warn!("list_path_raw: peek fnf, disk: {}", i);
                             continue;
-                        } else if err == rustfs_filemeta::Error::VolumeNotFound {
+                        } else if err == DiskError::VolumeNotFound {
                             at_eof += 1;
                             fnf += 1;
                             vnf += 1;
@@ -231,7 +232,7 @@ pub async fn list_path_raw(mut rx: B_Receiver<bool>, opts: ListPathRawOptions) -
                             continue;
                         } else {
                             has_err += 1;
-                            errs[i] = Some(err.into());
+                            errs[i] = Some(err);
                             // warn!("list_path_raw: peek err, disk: {}", i);
                             continue;
                         }

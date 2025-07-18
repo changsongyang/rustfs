@@ -16,6 +16,7 @@
 
 use crate::bitrot::{create_bitrot_reader, create_bitrot_writer};
 use crate::bucket::lifecycle::lifecycle::TRANSITION_COMPLETE;
+use crate::cache_value::{MetaCacheEntries, MetaCacheEntry, MetadataResolutionParams};
 use crate::client::{object_api_utils::extract_etag, transition_api::ReaderImpl};
 use crate::disk::error_reduce::{OBJECT_OP_IGNORED_ERRS, reduce_read_quorum_errs, reduce_write_quorum_errs};
 use crate::disk::{
@@ -78,8 +79,7 @@ use md5::{Digest as Md5Digest, Md5};
 use rand::{Rng, seq::SliceRandom};
 use rustfs_filemeta::headers::RESERVED_METADATA_PREFIX_LOWER;
 use rustfs_filemeta::{
-    FileInfo, FileMeta, FileMetaShallowVersion, MetaCacheEntries, MetaCacheEntry, MetadataResolutionParams, ObjectPartInfo,
-    RawFileInfo, file_info_from_raw,
+    FileInfo, FileMeta, FileMetaShallowVersion, ObjectPartInfo, RawFileInfo, file_info_from_raw,
     headers::{AMZ_OBJECT_TAGGING, AMZ_STORAGE_CLASS},
     merge_file_meta_versions,
 };

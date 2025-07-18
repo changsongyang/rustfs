@@ -18,6 +18,7 @@ use super::{
     error::ERR_SKIP_FILE,
     heal_commands::{HEAL_ITEM_BUCKET_METADATA, HealOpts, HealScanMode, HealStopSuccess, HealingTracker},
 };
+use crate::cache_value::MetaCacheEntry;
 use crate::error::{Error, Result};
 use crate::heal::heal_commands::{HEAL_ITEM_BUCKET, HEAL_ITEM_OBJECT};
 use crate::store_api::StorageAPI;
@@ -37,7 +38,6 @@ use crate::{
 use chrono::Utc;
 use futures::join;
 use lazy_static::lazy_static;
-use rustfs_filemeta::MetaCacheEntry;
 use rustfs_madmin::heal_commands::{HealDriveInfo, HealItemType, HealResultItem};
 use rustfs_utils::path::has_prefix;
 use rustfs_utils::path::path_join;

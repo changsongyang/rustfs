@@ -13,4 +13,7 @@
 // limitations under the License.
 
 // pub mod cache;
+pub mod metacache;
 pub mod metacache_set;
+
+pub use metacache::*;

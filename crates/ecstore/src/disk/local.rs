@@ -52,14 +52,12 @@ use rustfs_utils::path::{
 };
 use tokio::time::interval;
 
+use crate::cache_value::{Cache, MetaCacheEntry, MetacacheWriter, Opts, UpdateFn};
 use crate::erasure_coding::bitrot_verify;
 use bytes::Bytes;
 use path_absolutize::Absolutize;
 use rustfs_common::defer;
-use rustfs_filemeta::{
-    Cache, FileInfo, FileInfoOpts, FileMeta, MetaCacheEntry, MetacacheWriter, ObjectPartInfo, Opts, RawFileInfo, UpdateFn,
-    get_file_info, read_xl_meta_no_data,
-};
+use rustfs_filemeta::{FileInfo, FileInfoOpts, FileMeta, ObjectPartInfo, RawFileInfo, get_file_info, read_xl_meta_no_data};
 use rustfs_utils::HashAlgorithm;
 use rustfs_utils::os::get_info;
 use std::collections::{HashMap, HashSet};

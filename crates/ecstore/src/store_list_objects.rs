@@ -16,6 +16,9 @@ use crate::StorageAPI;
 use crate::bucket::metadata_sys::get_versioning_config;
 use crate::bucket::versioning::VersioningApi;
 use crate::cache_value::metacache_set::{ListPathRawOptions, list_path_raw};
+use crate::cache_value::{
+    MetaCacheEntries, MetaCacheEntriesSorted, MetaCacheEntriesSortedResult, MetaCacheEntry, MetadataResolutionParams,
+};
 use crate::disk::error::DiskError;
 use crate::disk::{DiskInfo, DiskStore};
 use crate::error::{
@@ -28,10 +31,7 @@ use crate::store_utils::is_reserved_or_invalid_bucket;
 use crate::{store::ECStore, store_api::ListObjectsV2Info};
 use futures::future::join_all;
 use rand::seq::SliceRandom;
-use rustfs_filemeta::{
-    FileInfo, MetaCacheEntries, MetaCacheEntriesSorted, MetaCacheEntriesSortedResult, MetaCacheEntry, MetadataResolutionParams,
-    merge_file_meta_versions,
-};
+use rustfs_filemeta::{FileInfo, merge_file_meta_versions};
 use rustfs_utils::path::{self, SLASH_SEPARATOR, base_dir_from_prefix};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -296,7 +296,7 @@ impl ECStore {
             });
 
         if let Some(err) = list_result.err.clone() {
-            if err != rustfs_filemeta::Error::Unexpected {
+            if err != DiskError::Unexpected {
                 return Err(to_object_err(err.into(), vec![bucket, prefix]));
             }
         }
@@ -407,7 +407,7 @@ impl ECStore {
         };
 
         if let Some(err) = list_result.err.clone() {
-            if err != rustfs_filemeta::Error::Unexpected {
+            if err != DiskError::Unexpected {
                 return Err(to_object_err(err.into(), vec![bucket, prefix]));
             }
         }
@@ -575,7 +575,7 @@ impl ECStore {
                     Err(err) => {
                         error!("list_path err_rx.recv() err {:?}", &err);
 
-                        MetaCacheEntriesSortedResult{ entries: None, err: Some(rustfs_filemeta::Error::other(err)) }
+                        MetaCacheEntriesSortedResult{ entries: None, err: Some(DiskError::other(err)) }
                     },
                 }
                },

@@ -24,9 +24,8 @@ pub enum Error {
     #[error("File version not found")]
     FileVersionNotFound,
 
-    #[error("Volume not found")]
-    VolumeNotFound,
-
+    // #[error("Volume not found")]
+    // VolumeNotFound,
     #[error("File corrupt")]
     FileCorrupt,
 
@@ -53,7 +52,7 @@ impl AutoErrorCode for Error {
         match self {
             Error::FileNotFound => 1,
             Error::FileVersionNotFound => 2,
-            Error::VolumeNotFound => 3,
+            // Error::VolumeNotFound => 3,
             Error::FileCorrupt => 4,
             Error::DoneForNow => 5,
             Error::MethodNotAllowed => 6,
@@ -66,7 +65,7 @@ impl AutoErrorCode for Error {
         match index {
             1 => Some(Error::FileNotFound),
             2 => Some(Error::FileVersionNotFound),
-            3 => Some(Error::VolumeNotFound),
+            // 3 => Some(Error::VolumeNotFound),
             4 => Some(Error::FileCorrupt),
             5 => Some(Error::DoneForNow),
             6 => Some(Error::MethodNotAllowed),
@@ -111,15 +110,8 @@ impl Error {
 impl PartialEq for Error {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (Error::FileCorrupt, Error::FileCorrupt) => true,
-            (Error::DoneForNow, Error::DoneForNow) => true,
-            (Error::MethodNotAllowed, Error::MethodNotAllowed) => true,
-            (Error::FileNotFound, Error::FileNotFound) => true,
-            (Error::FileVersionNotFound, Error::FileVersionNotFound) => true,
-            (Error::VolumeNotFound, Error::VolumeNotFound) => true,
             (Error::Io(e1), Error::Io(e2)) => e1.kind() == e2.kind() && e1.to_string() == e2.to_string(),
-            (Error::Unexpected, Error::Unexpected) => true,
-            (a, b) => a.to_string() == b.to_string(),
+            (a, b) => a.code() == b.code(),
         }
     }
 }
@@ -127,14 +119,8 @@ impl PartialEq for Error {
 impl Clone for Error {
     fn clone(&self) -> Self {
         match self {
-            Error::FileNotFound => Error::FileNotFound,
-            Error::FileVersionNotFound => Error::FileVersionNotFound,
-            Error::FileCorrupt => Error::FileCorrupt,
-            Error::DoneForNow => Error::DoneForNow,
-            Error::MethodNotAllowed => Error::MethodNotAllowed,
-            Error::VolumeNotFound => Error::VolumeNotFound,
             Error::Io(e) => Error::Io(std::io::Error::new(e.kind(), e.to_string())),
-            Error::Unexpected => Error::Unexpected,
+            a => Self::from_error_code(a.to_error_code()).unwrap(),
         }
     }
 }
@@ -163,7 +149,7 @@ macro_rules! impl_from_error {
     ($error_type:ty) => {
         impl From<$error_type> for Error {
             fn from(e: $error_type) -> Self {
-                Error::other(e.to_string())
+                Error::other(e)
             }
         }
     };
@@ -181,19 +167,12 @@ impl_from_error!(rmp_serde::decode::Error);
 impl_from_error!(rmp_serde::encode::Error);
 impl_from_error!(std::string::FromUtf8Error);
 impl_from_error!(rmp::decode::ValueReadError);
-impl_from_error!(rmp::decode::DecodeStringError<'_>);
+impl_from_error!(rmp::decode::DecodeStringError<'_>, debug);
 impl_from_error!(rmp::encode::ValueWriteError);
 impl_from_error!(rmp::decode::NumValueReadError);
 impl_from_error!(time::error::ComponentRange);
 impl_from_error!(uuid::Error);
 impl_from_error!(rmp::decode::MarkerReadError, debug);
-
-pub fn is_io_eof(e: &Error) -> bool {
-    match e {
-        Error::Io(e) => e.kind() == std::io::ErrorKind::UnexpectedEof,
-        _ => false,
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -233,7 +212,7 @@ mod tests {
         let test_cases = vec![
             Error::FileNotFound,
             Error::FileVersionNotFound,
-            Error::VolumeNotFound,
+            // Error::VolumeNotFound,
             Error::FileCorrupt,
             Error::DoneForNow,
             Error::MethodNotAllowed,
@@ -266,7 +245,7 @@ mod tests {
         let test_cases = vec![
             (Error::FileNotFound, "File not found"),
             (Error::FileVersionNotFound, "File version not found"),
-            (Error::VolumeNotFound, "Volume not found"),
+            // (Error::VolumeNotFound, "Volume not found"),
             (Error::FileCorrupt, "File corrupt"),
             (Error::DoneForNow, "Done for now"),
             (Error::MethodNotAllowed, "Method not allowed"),
@@ -276,19 +255,6 @@ mod tests {
         for (error, expected_message) in test_cases {
             assert_eq!(error.to_string(), expected_message);
         }
-    }
-
-    #[test]
-    fn test_is_io_eof_function() {
-        // Test is_io_eof helper function
-        let eof_error = Error::Io(IoError::new(ErrorKind::UnexpectedEof, "eof"));
-        assert!(is_io_eof(&eof_error));
-
-        let not_eof_error = Error::Io(IoError::new(ErrorKind::NotFound, "not found"));
-        assert!(!is_io_eof(&not_eof_error));
-
-        let non_io_error = Error::FileNotFound;
-        assert!(!is_io_eof(&non_io_error));
     }
 
     #[test]
@@ -453,7 +419,7 @@ mod tests {
         let test_cases = vec![
             (Error::FileNotFound, 1),
             (Error::FileVersionNotFound, 2),
-            (Error::VolumeNotFound, 3),
+            // (Error::VolumeNotFound, 3),
             (Error::FileCorrupt, 4),
             (Error::DoneForNow, 5),
             (Error::MethodNotAllowed, 6),
@@ -478,7 +444,7 @@ mod tests {
         let errors = vec![
             Error::FileNotFound,
             Error::FileVersionNotFound,
-            Error::VolumeNotFound,
+            // Error::VolumeNotFound,
             Error::FileCorrupt,
             Error::DoneForNow,
             Error::MethodNotAllowed,
