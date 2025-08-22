@@ -16,6 +16,8 @@ pub mod data_scanner;
 pub mod histogram;
 pub mod lifecycle;
 pub mod metrics;
+pub mod scanner_config;
 
 pub use data_scanner::Scanner;
 pub use metrics::ScannerMetrics;
+pub use scanner_config::{ScannerMode, ScannerPerfConfig};
