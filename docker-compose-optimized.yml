@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  rustfs-optimized:
+    image: rustfs/rustfs:latest
+    container_name: rustfs-optimized
+    ports:
+      - "9001:9001"  # API port
+      - "9002:9002"  # Console port (if enabled)
+    environment:
+      # Basic Configuration
+      RUSTFS_VOLUMES: /data
+      RUSTFS_ADDRESS: :9001
+      RUSTFS_ACCESS_KEY: rustfsadmin
+      RUSTFS_SECRET_KEY: rustfsadmin
+      RUSTFS_CONSOLE_ENABLE: "true"
+      
+      # Scanner Performance Optimization
+      # Disable or limit scanner for better write performance
+      RUSTFS_SCANNER_MODE: low_load_only  # Options: disabled, low_load_only, normal, aggressive
+      RUSTFS_SCANNER_INTERVAL: 7200       # Scan every 2 hours instead of 1 hour
+      RUSTFS_SCANNER_WRITE_THRESHOLD: 1000 # Pause scanner when IOPS > 1000
+      
+      # Write Buffer Pool Optimization
+      RUSTFS_WRITE_BUFFER_POOL: "true"    # Enable write buffer pool
+      RUSTFS_WRITE_BUFFER_SIZE_MB: 32     # 32MB buffer for small files
+      
+    volumes:
+      - rustfs-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9001/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  rustfs-data:
+    driver: local

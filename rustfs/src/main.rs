@@ -28,6 +28,7 @@ use crate::server::{SHUTDOWN_TIMEOUT, ServiceState, ServiceStateManager, Shutdow
 use chrono::Datelike;
 use clap::Parser;
 use license::init_license;
+use rustfs_ahm::scanner::ScannerMode;
 use rustfs_ahm::scanner::data_scanner::ScannerConfig;
 use rustfs_ahm::{
     Scanner, create_ahm_services_cancel_token, heal::storage::ECStoreHealStorage, init_heal_manager, shutdown_ahm_services,
@@ -55,6 +56,7 @@ use rustfs_obs::{init_obs, set_global_guard};
 use rustfs_utils::net::parse_and_resolve_address;
 use std::io::{Error, Result};
 use std::sync::Arc;
+use std::time::Duration;
 use tracing::{debug, error, info, instrument, warn};
 
 #[cfg(all(target_os = "linux", target_env = "gnu"))]
@@ -189,8 +191,36 @@ async fn run(opt: config::Opt) -> Result<()> {
     let heal_storage = Arc::new(ECStoreHealStorage::new(store.clone()));
     let heal_manager = init_heal_manager(heal_storage, None).await?;
 
-    let scanner = Scanner::new(Some(ScannerConfig::default()), Some(heal_manager));
-    scanner.start().await?;
+    // Configure scanner based on user settings
+    if opt.scanner_mode.to_lowercase() != "disabled" {
+        let scanner_mode = match opt.scanner_mode.to_lowercase().as_str() {
+            "low_load_only" => ScannerMode::LowLoadOnly,
+            "normal" => ScannerMode::Normal,
+            "aggressive" => ScannerMode::Aggressive,
+            _ => {
+                warn!("Invalid scanner mode '{}', using 'low_load_only'", opt.scanner_mode);
+                ScannerMode::LowLoadOnly
+            }
+        };
+
+        // Create scanner configuration with user settings
+        let mut scanner_config = ScannerConfig::default();
+        scanner_config.scan_interval = Duration::from_secs(opt.scanner_interval);
+
+        // Apply performance optimizations for low_load_only mode
+        if scanner_mode == ScannerMode::LowLoadOnly {
+            scanner_config.throttle_every_n_objects = 50; // More aggressive throttling
+            scanner_config.throttle_delay = Duration::from_millis(10); // Longer delays
+            scanner_config.skip_recently_modified_within = Duration::from_secs(1800); // Skip files modified in last 30 mins
+        }
+
+        info!("Starting scanner in {:?} mode with interval {}s", scanner_mode, opt.scanner_interval);
+
+        let scanner = Scanner::new(Some(scanner_config), Some(heal_manager));
+        scanner.start().await?;
+    } else {
+        info!("Scanner is disabled by configuration");
+    }
     print_server_info();
     init_bucket_replication_pool().await;
 

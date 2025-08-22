@@ -81,6 +81,26 @@ pub struct Opt {
 
     #[arg(long, env = "RUSTFS_REGION")]
     pub region: Option<String>,
+
+    /// Scanner mode: disabled, low_load_only, normal, aggressive
+    #[arg(long, default_value = "low_load_only", env = "RUSTFS_SCANNER_MODE")]
+    pub scanner_mode: String,
+
+    /// Scanner scan interval in seconds (default: 3600)
+    #[arg(long, default_value_t = 3600, env = "RUSTFS_SCANNER_INTERVAL")]
+    pub scanner_interval: u64,
+
+    /// Write load threshold (IOPS) to pause scanner (default: 1000)
+    #[arg(long, default_value_t = 1000, env = "RUSTFS_SCANNER_WRITE_THRESHOLD")]
+    pub scanner_write_threshold: u64,
+
+    /// Enable write buffer pool for small files (default: true)
+    #[arg(long, default_value_t = true, env = "RUSTFS_WRITE_BUFFER_POOL")]
+    pub write_buffer_pool: bool,
+
+    /// Write buffer pool size in MB (default: 16)
+    #[arg(long, default_value_t = 16, env = "RUSTFS_WRITE_BUFFER_SIZE_MB")]
+    pub write_buffer_size_mb: usize,
 }
 
 // lazy_static::lazy_static! {
