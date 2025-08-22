@@ -753,15 +753,21 @@ impl LocalDisk {
                 f.write_all(buf).await.map_err(to_file_error)?;
             }
             InternalBuf::Owned(buf) => {
-                // 直接在阻塞任务中写入，避免额外拷贝
-                let mut std_file = f.into_std().await;
-                tokio::task::spawn_blocking(move || {
-                    use std::io::Write as _;
-                    std_file.write_all(buf.as_ref()).map_err(to_file_error)
-                })
-                .await??;
-                // 注意：此处不再将 std_file 转回异步文件，除非需要 fsync
-                // 如果需要 fsync，我们将重新打开文件进行同步
+                // 对小对象直接使用异步写，避免 spawn_blocking 的调度开销
+                const SMALL_ASYNC_WRITE_THRESHOLD: usize = 64 * 1024; // 64KiB
+                if buf.len() <= SMALL_ASYNC_WRITE_THRESHOLD {
+                    f.write_all(buf.as_ref()).await.map_err(to_file_error)?;
+                } else {
+                    // 大对象使用阻塞写，减少拷贝
+                    let mut std_file = f.into_std().await;
+                    tokio::task::spawn_blocking(move || {
+                        use std::io::Write as _;
+                        std_file.write_all(buf.as_ref()).map_err(to_file_error)
+                    })
+                    .await??;
+                    // 注意：此处不再将 std_file 转回异步文件，除非需要 fsync
+                    // 如果需要 fsync，我们将重新打开文件进行同步
+                }
             }
         }
 
