@@ -234,11 +234,11 @@ impl LocalDisk {
             // format_last_check: Mutex::new(format_last_check),
             exit_signal: None,
             fsync_batcher: FsyncBatcher::new(FsyncBatcherConfig {
-                mode: FsyncMode::Batch,                    // 默认使用批量模式
-                batch_size: 32,                            // 批量大小，可根据系统配置调整
-                batch_timeout: Duration::from_millis(100), // 100ms超时
-                adaptive: true,                            // 启用自适应调整
-                max_pending: 1000,                         // 最大等待文件数
+                mode: FsyncMode::None, // 与 alpha45 对齐：默认不主动 fsync
+                batch_size: 32,
+                batch_timeout: Duration::from_millis(100),
+                adaptive: true,
+                max_pending: 1000,
             }),
         };
         let (info, _root) = get_disk_info(root).await?;
@@ -753,31 +753,33 @@ impl LocalDisk {
                 f.write_all(buf).await.map_err(to_file_error)?;
             }
             InternalBuf::Owned(buf) => {
-                // Reduce one copy by using the owned buffer directly.
-                // It may be more efficient for larger writes.
-                let std_file = f.into_std().await;
-                let task = tokio::task::spawn_blocking(move || {
+                // 直接在阻塞任务中写入，避免额外拷贝
+                let mut std_file = f.into_std().await;
+                tokio::task::spawn_blocking(move || {
                     use std::io::Write as _;
-                    let mut f = std_file;
-                    f.write_all(buf.as_ref()).map_err(to_file_error)?;
-                    Ok::<std::fs::File, Error>(f) // 返回文件句柄以便后续使用
-                });
-                let std_file = task.await??;
-
-                // 将文件句柄转回tokio::fs::File以支持异步fsync
-                f = tokio::fs::File::from_std(std_file);
+                    std_file.write_all(buf.as_ref()).map_err(to_file_error)
+                })
+                .await??;
+                // 注意：此处不再将 std_file 转回异步文件，除非需要 fsync
+                // 如果需要 fsync，我们将重新打开文件进行同步
             }
         }
 
-        // 使用批处理器处理fsync
-        // 根据sync参数决定是否需要同步，如果需要则加入批处理队列
+        // 仅在需要同步且批处理模式启用时进行 fsync；默认 None 与 alpha45 一致
         if sync {
-            // 将文件加入fsync批处理队列
-            // 批处理器会智能地决定何时执行实际的fsync操作
-            self.fsync_batcher
-                .add_file(f, file_path.to_string_lossy().to_string())
-                .await
-                .map_err(to_file_error)?;
+            match self.fsync_batcher.mode().await {
+                FsyncMode::None => {
+                    // 与 alpha45 一致，不执行 fsync
+                }
+                _ => {
+                    // 重新以异步方式打开文件以加入批处理同步
+                    let f_for_sync = self.open_file(file_path, O_WRONLY, skip_parent).await?;
+                    self.fsync_batcher
+                        .add_file(f_for_sync, file_path.to_string_lossy().to_string())
+                        .await
+                        .map_err(to_file_error)?;
+                }
+            }
         }
 
         Ok(())

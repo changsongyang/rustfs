@@ -102,6 +102,11 @@ impl FsyncBatcher {
         batcher
     }
 
+    /// 获取当前同步模式
+    pub async fn mode(&self) -> FsyncMode {
+        self.config.lock().await.mode
+    }
+
     /// 添加文件到批处理队列
     pub async fn add_file(&self, file: File, path: String) -> Result<(), std::io::Error> {
         let config = self.config.lock().await;
