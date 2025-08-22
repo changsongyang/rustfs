@@ -17,7 +17,9 @@ pub mod histogram;
 pub mod lifecycle;
 pub mod metrics;
 pub mod scanner_config;
+pub mod smart_scheduler;
 
 pub use data_scanner::Scanner;
 pub use metrics::ScannerMetrics;
 pub use scanner_config::{ScannerMode, ScannerPerfConfig};
+pub use smart_scheduler::SmartScheduler;

@@ -33,6 +33,7 @@ pub mod global;
 pub mod lock_utils;
 pub mod metrics_realtime;
 pub mod notification_sys;
+pub mod optimized_lock;
 pub mod perf_monitor;
 pub mod pools;
 pub mod rebalance;

@@ -66,6 +66,7 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use super::fsync_batcher::{FsyncBatcher, FsyncBatcherConfig, FsyncMode}; // 引入fsync批处理器
+use super::write_buffer_pool::{WriteBufferPool, WriteBufferPoolConfig}; // 引入写缓冲池
 use std::collections::HashMap;
 use std::sync::Mutex;
 
@@ -113,6 +114,8 @@ pub struct LocalDisk {
     // 添加fsync批处理器
     // 这个批处理器会根据配置智能地批量执行fsync操作，减少系统调用开销
     fsync_batcher: FsyncBatcher,
+    // 写缓冲池，用于小文件写入优化
+    write_buffer_pool: Option<WriteBufferPool>,
     // 目录存在性缓存，避免重复检查
     dir_cache: Arc<Mutex<HashMap<PathBuf, bool>>>,
 }
@@ -244,6 +247,15 @@ impl LocalDisk {
                 adaptive: true,
                 max_pending: 1000,
             }),
+            // 启用写缓冲池优化小文件写入
+            write_buffer_pool: Some(WriteBufferPool::new(WriteBufferPoolConfig {
+                max_buffer_size: 4 * 1024 * 1024, // 4MB 缓冲区
+                total_capacity: 64 * 1024 * 1024, // 64MB 总容量
+                flush_interval: Duration::from_millis(100),
+                combine_window: Duration::from_millis(10),
+                enable_combining: true,
+                small_file_threshold: 256 * 1024, // 256KB 以下使用缓冲
+            })),
             dir_cache: Arc::new(Mutex::new(HashMap::new())),
         };
         let (info, _root) = get_disk_info(root).await?;
@@ -749,6 +761,19 @@ impl LocalDisk {
         sync: bool,
         skip_parent: &Path,
     ) -> Result<()> {
+        // 尝试使用写缓冲池优化小文件写入
+        if let InternalBuf::Owned(ref buf) = data {
+            if let Some(ref pool) = self.write_buffer_pool {
+                // 小文件且不需要立即同步时使用缓冲池
+                if buf.len() <= 256 * 1024 && !sync {
+                    return pool
+                        .write(file_path.to_path_buf(), buf.clone())
+                        .await
+                        .map_err(|e| Error::other(e));
+                }
+            }
+        }
+
         let flags = O_CREATE | O_WRONLY | O_TRUNC;
 
         let mut f = self.open_file(file_path, flags, skip_parent).await?;
