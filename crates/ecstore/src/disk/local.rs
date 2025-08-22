@@ -66,6 +66,8 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use super::fsync_batcher::{FsyncBatcher, FsyncBatcherConfig, FsyncMode}; // 引入fsync批处理器
+use std::collections::HashMap;
+use std::sync::Mutex;
 
 #[derive(Debug)]
 pub struct FormatInfo {
@@ -111,6 +113,8 @@ pub struct LocalDisk {
     // 添加fsync批处理器
     // 这个批处理器会根据配置智能地批量执行fsync操作，减少系统调用开销
     fsync_batcher: FsyncBatcher,
+    // 目录存在性缓存，避免重复检查
+    dir_cache: Arc<Mutex<HashMap<PathBuf, bool>>>,
 }
 
 impl Drop for LocalDisk {
@@ -240,6 +244,7 @@ impl LocalDisk {
                 adaptive: true,
                 max_pending: 1000,
             }),
+            dir_cache: Arc::new(Mutex::new(HashMap::new())),
         };
         let (info, _root) = get_disk_info(root).await?;
         disk.major = info.major;
@@ -798,7 +803,27 @@ impl LocalDisk {
         }
 
         if let Some(parent) = path.as_ref().parent() {
-            super::os::make_dir_all(parent, skip_parent).await?;
+            let parent_path = parent.to_path_buf();
+
+            // 检查缓存中是否已知该目录存在
+            let needs_create = {
+                let cache = self.dir_cache.lock().unwrap();
+                !cache.get(&parent_path).copied().unwrap_or(false)
+            };
+
+            if needs_create {
+                // 只在缓存中没有或为 false 时才尝试创建目录
+                if let Err(e) = super::os::make_dir_all(parent, skip_parent).await {
+                    // 如果是已存在错误，仍然标记为已创建
+                    if e != DiskError::VolumeExists {
+                        return Err(e);
+                    }
+                }
+
+                // 更新缓存
+                let mut cache = self.dir_cache.lock().unwrap();
+                cache.insert(parent_path, true);
+            }
         }
 
         let f = super::fs::open_file(path.as_ref(), mode).await.map_err(to_file_error)?;
