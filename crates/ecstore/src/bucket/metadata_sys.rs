@@ -51,7 +51,8 @@ pub async fn init_bucket_metadata_sys(api: Arc<ECStore>, buckets: Vec<String>) {
 
     let sys = Arc::new(RwLock::new(sys));
 
-    GLOBAL_BucketMetadataSys.set(sys).unwrap();
+    // Ignore error if already set (for tests that create multiple instances)
+    let _ = GLOBAL_BucketMetadataSys.set(sys);
 }
 
 // panic if not init

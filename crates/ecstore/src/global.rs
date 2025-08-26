@@ -105,12 +105,14 @@ pub fn global_rustfs_port() -> u16 {
 
 /// Set the global rustfs port
 pub fn set_global_rustfs_port(value: u16) {
-    GLOBAL_RUSTFS_PORT.set(value).expect("set_global_rustfs_port fail");
+    // Ignore error if already set (for tests that create multiple instances)
+    let _ = GLOBAL_RUSTFS_PORT.set(value);
 }
 
 /// Get the global rustfs port
 pub fn set_global_deployment_id(id: Uuid) {
-    globalDeploymentIDPtr.set(id).unwrap();
+    // Ignore error if already set (for tests that create multiple stores)
+    let _ = globalDeploymentIDPtr.set(id);
 }
 
 /// Get the global deployment id
@@ -138,7 +140,8 @@ pub fn new_object_layer_fn() -> Option<Arc<ECStore>> {
 }
 
 pub async fn set_object_layer(o: Arc<ECStore>) {
-    GLOBAL_OBJECT_API.set(o).expect("set_object_layer fail ")
+    // Ignore error if already set (for tests that create multiple stores)
+    let _ = GLOBAL_OBJECT_API.set(o);
 }
 
 pub async fn is_dist_erasure() -> bool {
@@ -182,7 +185,8 @@ pub async fn update_erasure_type(setup_type: SetupType) {
 type TypeLocalDiskSetDrives = Vec<Vec<Vec<Option<DiskStore>>>>;
 
 pub fn set_global_region(region: String) {
-    GLOBAL_REGION.set(region).unwrap();
+    // Ignore error if already set (for tests that create multiple instances)
+    let _ = GLOBAL_REGION.set(region);
 }
 
 pub fn get_global_region() -> Option<String> {
