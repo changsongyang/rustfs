@@ -1084,13 +1084,24 @@ impl FileMeta {
 
     /// Count shared data directories
     pub fn shared_data_dir_count(&self, version_id: Option<Uuid>, data_dir: Option<Uuid>) -> usize {
+        if self.data.entries().unwrap_or_default() > 0
+            && version_id.is_some()
+            && self
+                .data
+                .find(version_id.unwrap().to_string().as_str())
+                .unwrap_or_default()
+                .is_some()
+        {
+            return 0;
+        }
+
         self.versions
             .iter()
             .filter(|v| {
                 v.header.version_type == VersionType::Object && v.header.version_id != version_id && v.header.user_data_dir()
             })
-            .filter_map(|v| FileMetaVersion::decode_data_dir_from_meta(&v.meta).ok().flatten())
-            .filter(|&dir| Some(dir) == data_dir)
+            .filter_map(|v| FileMetaVersion::decode_data_dir_from_meta(&v.meta).ok())
+            .filter(|&dir| dir == data_dir)
             .count()
     }
 
